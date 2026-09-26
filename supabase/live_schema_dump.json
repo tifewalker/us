@@ -1,0 +1,294 @@
+[
+  {
+    "kind": "FK",
+    "detail": "activity_responses :: FOREIGN KEY (daily_activity_id) REFERENCES daily_activities(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "activity_responses :: FOREIGN KEY (user_id) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "bottles :: FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "bottles :: FOREIGN KEY (recipient_id) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "bottles :: FOREIGN KEY (sender_id) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "couple_world :: FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "couples :: FOREIGN KEY (partner_one) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "couples :: FOREIGN KEY (partner_two) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "daily_activities :: FOREIGN KEY (activity_id) REFERENCES activities(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "daily_activities :: FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "important_dates :: FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "memories :: FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "memories :: FOREIGN KEY (created_by) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "memory_media :: FOREIGN KEY (created_by) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "memory_media :: FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "memory_reflections :: FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "memory_reflections :: FOREIGN KEY (user_id) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "missions :: FOREIGN KEY (couple_id) REFERENCES couples(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FK",
+    "detail": "missions :: FOREIGN KEY (recipient_id) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "missions :: FOREIGN KEY (sender_id) REFERENCES users(id)"
+  },
+  {
+    "kind": "FK",
+    "detail": "users :: FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE"
+  },
+  {
+    "kind": "FUNCTION",
+    "detail": "CREATE OR REPLACE FUNCTION public.handle_new_user()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\nbegin\r\n  insert into public.users (id, name)\r\n  values (new.id, coalesce(new.raw_user_meta_data->>'name', 'New user'));\r\n  return new;\r\nend;\r\n$function$\n"
+  },
+  {
+    "kind": "FUNCTION",
+    "detail": "CREATE OR REPLACE FUNCTION public.is_couple_member(target_couple_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\nAS $function$\r\n  select exists (\r\n    select 1 from public.couples c\r\n    where c.id = target_couple_id\r\n      and (c.partner_one = auth.uid() or c.partner_two = auth.uid())\r\n  );\r\n$function$\n"
+  },
+  {
+    "kind": "FUNCTION",
+    "detail": "CREATE OR REPLACE FUNCTION public.rls_auto_enable()\n RETURNS event_trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog'\nAS $function$\nDECLARE\n  cmd record;\nBEGIN\n  FOR cmd IN\n    SELECT *\n    FROM pg_event_trigger_ddl_commands()\n    WHERE command_tag IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')\n      AND object_type IN ('table','partitioned table')\n  LOOP\n     IF cmd.schema_name IS NOT NULL AND cmd.schema_name IN ('public') AND cmd.schema_name NOT IN ('pg_catalog','information_schema') AND cmd.schema_name NOT LIKE 'pg_toast%' AND cmd.schema_name NOT LIKE 'pg_temp%' THEN\n      BEGIN\n        EXECUTE format('alter table if exists %s enable row level security', cmd.object_identity);\n        RAISE LOG 'rls_auto_enable: enabled RLS on %', cmd.object_identity;\n      EXCEPTION\n        WHEN OTHERS THEN\n          RAISE LOG 'rls_auto_enable: failed to enable RLS on %', cmd.object_identity;\n      END;\n     ELSE\n        RAISE LOG 'rls_auto_enable: skip % (either system schema or not in enforced list: %.)', cmd.object_identity, cmd.schema_name;\n     END IF;\n  END LOOP;\nEND;\n$function$\n"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "activities :: CREATE UNIQUE INDEX activities_pkey ON public.activities USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "activity_responses :: CREATE UNIQUE INDEX activity_responses_pkey ON public.activity_responses USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "bottles :: CREATE UNIQUE INDEX bottles_pkey ON public.bottles USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "couple_world :: CREATE UNIQUE INDEX couple_world_pkey ON public.couple_world USING btree (couple_id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "couples :: CREATE UNIQUE INDEX couples_invite_code_key ON public.couples USING btree (invite_code)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "couples :: CREATE UNIQUE INDEX couples_pkey ON public.couples USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "daily_activities :: CREATE UNIQUE INDEX daily_activities_couple_date_unique ON public.daily_activities USING btree (couple_id, activity_date)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "daily_activities :: CREATE UNIQUE INDEX daily_activities_pkey ON public.daily_activities USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "important_dates :: CREATE UNIQUE INDEX important_dates_pkey ON public.important_dates USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "memories :: CREATE UNIQUE INDEX memories_pkey ON public.memories USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "memory_media :: CREATE UNIQUE INDEX memory_media_pkey ON public.memory_media USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "memory_reflections :: CREATE UNIQUE INDEX memory_reflections_pkey ON public.memory_reflections USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "missions :: CREATE UNIQUE INDEX missions_pkey ON public.missions USING btree (id)"
+  },
+  {
+    "kind": "INDEX",
+    "detail": "users :: CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.activities :: authenticated users can read activities [SELECT] USING((auth.role() = 'authenticated'::text)) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.activity_responses :: couple members can manage activity_responses [ALL] USING((EXISTS ( SELECT 1\n   FROM daily_activities da\n  WHERE ((da.id = activity_responses.daily_activity_id) AND is_couple_member(da.couple_id))))) CHECK((EXISTS ( SELECT 1\n   FROM daily_activities da\n  WHERE ((da.id = activity_responses.daily_activity_id) AND is_couple_member(da.couple_id)))))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.bottles :: couple members can manage bottles [ALL] USING(is_couple_member(couple_id)) CHECK(is_couple_member(couple_id))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.couple_world :: couple members can manage couple_world [ALL] USING(is_couple_member(couple_id)) CHECK(is_couple_member(couple_id))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.couples :: authenticated users can join an open invite [UPDATE] USING(((invite_code IS NOT NULL) AND (partner_two IS NULL))) CHECK((partner_two = auth.uid()))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.couples :: authenticated users can view open invites [SELECT] USING((invite_code IS NOT NULL)) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.couples :: couple members can update couple [UPDATE] USING(((partner_one = auth.uid()) OR (partner_two = auth.uid()))) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.couples :: couple members can view couple [SELECT] USING(((partner_one = auth.uid()) OR (partner_two = auth.uid()))) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.couples :: creator can insert couple [INSERT] USING() CHECK((partner_one = auth.uid()))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.daily_activities :: couple members can manage daily_activities [ALL] USING(is_couple_member(couple_id)) CHECK(is_couple_member(couple_id))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.important_dates :: couple members can manage important_dates [ALL] USING(is_couple_member(couple_id)) CHECK(is_couple_member(couple_id))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.memories :: couple members can manage memories [ALL] USING(is_couple_member(couple_id)) CHECK(is_couple_member(couple_id))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.memory_media :: couple members can manage memory_media [ALL] USING((EXISTS ( SELECT 1\n   FROM memories m\n  WHERE ((m.id = memory_media.memory_id) AND is_couple_member(m.couple_id))))) CHECK((EXISTS ( SELECT 1\n   FROM memories m\n  WHERE ((m.id = memory_media.memory_id) AND is_couple_member(m.couple_id)))))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.memory_reflections :: couple members can manage memory_reflections [ALL] USING((EXISTS ( SELECT 1\n   FROM memories m\n  WHERE ((m.id = memory_reflections.memory_id) AND is_couple_member(m.couple_id))))) CHECK((EXISTS ( SELECT 1\n   FROM memories m\n  WHERE ((m.id = memory_reflections.memory_id) AND is_couple_member(m.couple_id)))))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.missions :: couple members can manage missions [ALL] USING(is_couple_member(couple_id)) CHECK(is_couple_member(couple_id))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.users :: users can insert own row [INSERT] USING() CHECK((id = auth.uid()))"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.users :: users can update own row [UPDATE] USING((id = auth.uid())) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "public.users :: users can view own row [SELECT] USING((id = auth.uid())) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "storage.objects :: couple members can delete their media [DELETE] USING(((bucket_id = 'memory-media'::text) AND is_couple_member(((storage.foldername(name))[1])::uuid))) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "storage.objects :: couple members can read their media [SELECT] USING(((bucket_id = 'memory-media'::text) AND is_couple_member(((storage.foldername(name))[1])::uuid))) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "storage.objects :: couple members can update their media [UPDATE] USING(((bucket_id = 'memory-media'::text) AND is_couple_member(((storage.foldername(name))[1])::uuid))) CHECK()"
+  },
+  {
+    "kind": "POLICY",
+    "detail": "storage.objects :: couple members can upload their media [INSERT] USING() CHECK(((bucket_id = 'memory-media'::text) AND is_couple_member(((storage.foldername(name))[1])::uuid)))"
+  },
+  {
+    "kind": "RLS",
+    "detail": "activities enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "activity_responses enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "bottles enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "couple_world enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "couples enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "daily_activities enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "important_dates enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "memories enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "memory_media enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "memory_reflections enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "missions enabled=true"
+  },
+  {
+    "kind": "RLS",
+    "detail": "users enabled=true"
+  },
+  {
+    "kind": "TRIGGER",
+    "detail": "auth.users :: on_auth_user_created AFTER INSERT EXECUTE FUNCTION handle_new_user()"
+  }
+]

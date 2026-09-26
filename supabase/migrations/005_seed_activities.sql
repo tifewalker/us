@@ -1,0 +1,6 @@
+-- RECONSTRUCTED — rows already exist in live DB; seed text not recovered.
+-- Documents live DB state. Already applied. Do not re-run.
+--
+-- The original insert into public.activities was never saved to the repo, and
+-- the schema dump contains no row data. To recover it, export the rows from
+-- the live table (Table Editor → activities → Export CSV) and paste them here.
