@@ -160,12 +160,17 @@ function b64urlEncode(b: Uint8Array) {
   return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// Secrets pasted into the dashboard can carry stray spaces or quotes — a
+// leading space in VAPID_SUBJECT made Apple reject every push (403
+// BadJwtToken, 2026-09-27). Always clean them.
+const secret = (name: string) => (Deno.env.get(name) ?? "").trim().replace(/^["']|["']$/g, "").trim();
+
 let server: Promise<webpush.ApplicationServer> | null = null;
 function appServer() {
   if (!server) {
     server = (async () => {
-      const pub = b64urlDecode(Deno.env.get("VAPID_PUBLIC_KEY") ?? "");
-      const d = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
+      const pub = b64urlDecode(secret("VAPID_PUBLIC_KEY"));
+      const d = secret("VAPID_PRIVATE_KEY");
       if (pub.length !== 65 || !d) throw new Error("VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY secrets are missing");
       const x = b64urlEncode(pub.slice(1, 33));
       const y = b64urlEncode(pub.slice(33, 65));
@@ -174,7 +179,7 @@ function appServer() {
         privateKey: { kty: "EC", crv: "P-256", x, y, d, ext: true },
       });
       return webpush.ApplicationServer.new({
-        contactInformation: Deno.env.get("VAPID_SUBJECT") ?? "mailto:notifications@example.com",
+        contactInformation: secret("VAPID_SUBJECT") || "mailto:notifications@example.com",
         vapidKeys,
       });
     })();
