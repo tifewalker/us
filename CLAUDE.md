@@ -302,7 +302,6 @@ Test: Settings → Notifications → "Send me a test" (notify-send `{kind:"test"
 - **Next chapter** (`components/anniversary/NextChapter.tsx`): text and/or voice (60s) → `anniversary_answers`; voice at `<couple>/anniversary/<year>/<me>/…` (storage lock like 018: uploader, or the partner once they've answered that year). Envelope reveal once (seen flag `anniversary.reveal.<me>.<couple>.<year>`), live via Realtime (filter by couple, check year in the payload). Reachable any time from Us → Our years (`?page=answer`).
 - **Notification**: notify-scheduled at 19:30–22:30 on the anniversary → `recap_ready` "Your year together is ready to watch 🌅" (/anniversary/N) only if no `anniversary_views` row for you + that year. The 08:30 "Happy anniversary" stays.
 - **Dev panel** (long-press the sign, `__DEV__`): "Force anniversary mode" (visuals + replays the moment; doesn't set the seen flag), "Preview recap (last 12 months)" (`/anniversary/preview` — today's data, year = null, never writes answers or views), "Add a year stone (visual)" (+1 each tap, not saved).
-- notify-send's deployed bundle carries a trimmed copy of `_shared/notify.ts` (only `deliver` + helpers, same code) — redeploy it from the repo files if `_shared` changes.
 
 ## Deleting data
 
