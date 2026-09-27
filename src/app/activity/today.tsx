@@ -1,4 +1,16 @@
 import {
+  Body,
+  Button,
+  Handwritten,
+  Icon3D,
+  Input,
+  PaperCard,
+  PressableScale,
+  ScreenBackground,
+  Title,
+  WashiTape,
+} from '@/components/ui';
+import {
   getActivityResponses,
   getSignedActivityMediaUrl,
   getTodayActivity,
@@ -6,23 +18,36 @@ import {
   submitActivityResponse,
   uploadActivityResponseMedia,
 } from '@/lib/activities';
+import { EnvelopeReveal, type RevealAnswer } from '@/components/moments/EnvelopeReveal';
+import { PaperBoat } from '@/components/moments/effects';
+import { SongCard } from '@/components/music/SongCard';
+import { SongPicker } from '@/components/music/SongPicker';
+import { usePreviewStopOnBlur } from '@/components/music/usePreviewStopOnBlur';
+import { getUserName } from '@/lib/auth';
 import { getMyCouple } from '@/lib/couples';
+import { answersMatch, hasSeenReveal, markRevealSeen } from '@/lib/moments';
+import type { Song } from '@/lib/music';
 import { supabase } from '@/lib/supabase';
+import { colors, ENTRANCE_DURATION, GUTTER, radius, shadows, space } from '@/theme';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
-  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TodayActivity() {
+  const insets = useSafeAreaInsets();
   const [coupleId, setCoupleId] = useState<string | null>(null);
   const [dailyActivity, setDailyActivity] = useState<any>(null);
   const [myResponse, setMyResponse] = useState<any>(null);
@@ -31,14 +56,26 @@ export default function TodayActivity() {
   const [partnerMediaUrl, setPartnerMediaUrl] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [pickedPhoto, setPickedPhoto] = useState<string | null>(null);
+  const [pickedSong, setPickedSong] = useState<Song | null>(null);
+  const [songPickerOpen, setSongPickerOpen] = useState(false);
+  usePreviewStopOnBlur();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const { width } = useWindowDimensions();
+  // __DEV__ "Replay reveal" opens this screen with ?replayReveal=1 (ignores "already seen").
+  const { replayReveal } = useLocalSearchParams<{ replayReveal?: string }>();
+  const [myId, setMyId] = useState<string | null>(null);
+  const [names, setNames] = useState<{ me: string; partner: string }>({ me: 'You', partner: 'Your partner' });
+  // 'envelopes' = the sealed-envelope moment (first time); 'static' = already seen
+  const [reveal, setReveal] = useState<'none' | 'envelopes' | 'static'>('none');
+  const arrivedLive = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` = refetch without the full-screen spinner (Realtime arrival, "Check again").
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const couple = await getMyCouple();
-      if (!couple) throw new Error('Could not find our world.');
+      if (!couple) throw new Error('Could not find your world.');
       setCoupleId(couple.id);
 
       const activity = await getTodayActivity(couple.id);
@@ -46,6 +83,16 @@ export default function TodayActivity() {
 
       const { data: authData } = await supabase.auth.getUser();
       const myId = authData.user?.id;
+      if (myId) setMyId(myId);
+      const partnerId = couple.partner_one === myId ? couple.partner_two : couple.partner_one;
+      const [myName, partnerName] = await Promise.all([
+        myId ? getUserName(myId).catch(() => null) : null,
+        partnerId ? getUserName(partnerId).catch(() => null) : null,
+      ]);
+      setNames({
+        me: myName?.trim().split(/\s+/)[0] ?? 'You',
+        partner: partnerName?.trim().split(/\s+/)[0] ?? 'Your partner',
+      });
 
       const responses = await getActivityResponses(activity.id);
       const mine = responses.find((r) => r.user_id === myId) ?? null;
@@ -59,12 +106,51 @@ export default function TodayActivity() {
         const url = await getSignedActivityMediaUrl(theirs.media_url).catch(() => null);
         setPartnerMediaUrl(url);
       }
+
+      if (mine && theirs && myId) {
+        const seen = replayReveal ? false : await hasSeenReveal(myId, activity.id);
+        setReveal(seen ? 'static' : 'envelopes');
+      } else {
+        setReveal('none');
+      }
     } catch (err: any) {
       Alert.alert('Something went wrong', err.message ?? String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [replayReveal]);
+
+  // Live reveal: once I've answered, listen for my partner's answer on this
+  // daily activity. RLS decides delivery — their row only reaches me because
+  // I've already answered (migration 009/013). Unsubscribe on leave.
+  const activityId = dailyActivity?.id as string | undefined;
+  const waitingForPartner = !!myResponse && !partnerResponse;
+  useEffect(() => {
+    if (!activityId || !waitingForPartner || !myId) return;
+    const channel = supabase
+      .channel(`reveal-${activityId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'activity_responses', filter: `daily_activity_id=eq.${activityId}` },
+        (payload: any) => {
+          const row = payload.new as { user_id?: string } | undefined;
+          if (row?.user_id && row.user_id !== myId) {
+            arrivedLive.current = true;
+            load(true);
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activityId, waitingForPartner, myId, load]);
+
+  const finishReveal = useCallback(() => {
+    if (myId && activityId) markRevealSeen(myId, activityId);
+    arrivedLive.current = false;
+    setReveal('static');
+  }, [myId, activityId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -86,12 +172,17 @@ export default function TodayActivity() {
 
   async function handleSubmit() {
     const isPhotoPrompt = dailyActivity?.activities?.response_type === 'photo';
+    const isSongPrompt = dailyActivity?.activities?.response_type === 'song';
 
     if (isPhotoPrompt && !pickedPhoto) {
       Alert.alert('Add a photo', 'This one needs a picture, not just text.');
       return;
     }
-    if (!isPhotoPrompt && !inputText.trim()) {
+    if (isSongPrompt && !pickedSong) {
+      Alert.alert('Pick a song', 'This one needs a song.');
+      return;
+    }
+    if (!isPhotoPrompt && !isSongPrompt && !inputText.trim()) {
       Alert.alert('Say something', 'Write your answer first.');
       return;
     }
@@ -109,11 +200,13 @@ export default function TodayActivity() {
 
       await submitActivityResponse(
         dailyActivity.id,
-        inputText.trim() || (isPhotoPrompt ? '📸' : ''),
-        mediaPath
+        inputText.trim() || (isPhotoPrompt ? '📸' : isSongPrompt ? '🎵' : ''),
+        mediaPath,
+        isSongPrompt ? pickedSong : null
       );
       setInputText('');
       setPickedPhoto(null);
+      setPickedSong(null);
       // Refetch: now that I've answered, RLS lets me read their response.
       await load();
     } catch (err: any) {
@@ -125,9 +218,11 @@ export default function TodayActivity() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color="#FF6B6B" />
-      </View>
+      <ScreenBackground>
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.coral} />
+        </View>
+      </ScreenBackground>
     );
   }
 
@@ -136,143 +231,281 @@ export default function TodayActivity() {
   const bothAnswered = myResponse && partnerResponse;
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.category}>
-        {activity?.category ? `${activity.category.toUpperCase()} ✦` : ''}
-      </Text>
-      <Text style={styles.prompt}>{activity?.title}</Text>
-      <Text style={styles.description}>{activity?.description}</Text>
+    <ScreenBackground padded={false}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: insets.top + space.xl, paddingBottom: insets.bottom + space.xxxl },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* The prompt arrives as a note from a bottle. */}
+          <View style={styles.promptWrap}>
+            <Icon3D name="bottle" size={64} style={styles.bottle} />
+            <PaperCard style={styles.promptCard}>
+              <WashiTape color="sky" rotate={-4} style={styles.promptTape} />
+              {activity?.category ? (
+                <Body variant="label" color={colors.ocean}>
+                  {sentenceCase(activity.category)}
+                </Body>
+              ) : null}
+              <Title variant="heading" style={styles.prompt}>
+                {activity?.title}
+              </Title>
+              {activity?.description ? (
+                <Body color={colors.inkSoft} style={styles.description}>
+                  {activity.description}
+                </Body>
+              ) : null}
+            </PaperCard>
+          </View>
 
-      {!myResponse && (
-        <Text style={styles.statusText}>
-          {partnerAnswered
-            ? "Your partner's already answered — your turn 👀"
-            : 'Waiting for your partner'}
-        </Text>
-      )}
-
-      {responseType === 'voice' && !myResponse && (
-        <Text style={styles.voiceNote}>
-          Voice recording is coming soon — for now, just type what you'd say.
-        </Text>
-      )}
-
-      {!myResponse && responseType === 'photo' && (
-        <View style={styles.answerBox}>
-          <Pressable style={styles.pickButton} onPress={pickPhoto}>
-            <Text style={styles.pickButtonText}>
-              {pickedPhoto ? 'Change Photo' : '+ Choose a Photo'}
-            </Text>
-          </Pressable>
-          {pickedPhoto && (
-            <Image source={{ uri: pickedPhoto }} style={styles.previewImage} />
+          {!myResponse && (
+            <View style={styles.status}>
+              <Icon3D name={partnerAnswered ? 'sparkles' : 'hourglass'} size={28} />
+              <Body variant="bodyStrong" color={colors.inkOcean} style={styles.flex}>
+                {partnerAnswered
+                  ? "Your partner's already answered — your turn"
+                  : 'Waiting for your partner'}
+              </Body>
+            </View>
           )}
-          <Pressable style={styles.button} onPress={handleSubmit} disabled={submitting}>
-            <Text style={styles.buttonText}>{submitting ? 'Saving…' : 'Submit Photo'}</Text>
-          </Pressable>
-        </View>
-      )}
 
-      {!myResponse && responseType !== 'photo' && (
-        <View style={styles.answerBox}>
-          <TextInput
-            style={styles.input}
-            placeholder="Your answer…"
-            placeholderTextColor="#7EC8E399"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-          />
-          <Pressable style={styles.button} onPress={handleSubmit} disabled={submitting}>
-            <Text style={styles.buttonText}>
-              {submitting ? 'Saving…' : 'Submit Answer'}
-            </Text>
-          </Pressable>
-        </View>
-      )}
+          {responseType === 'voice' && !myResponse && (
+            <Body variant="small" color={colors.inkSoft} style={styles.voiceNote}>
+              Voice recording is coming soon — for now, just type what you'd say.
+            </Body>
+          )}
 
-      {myResponse && !partnerResponse && (
-        <View style={styles.waitingBox}>
-          <Text style={styles.waitingText}>
-            ❤️ Your answer is in — waiting for your partner to answer too.
-          </Text>
-          <Pressable style={styles.refreshButton} onPress={load}>
-            <Text style={styles.refreshText}>Check again</Text>
-          </Pressable>
-        </View>
-      )}
+          {!myResponse && responseType === 'photo' && (
+            <View style={styles.answerBox}>
+              <PressableScale
+                onPress={pickPhoto}
+                accessibilityRole="button"
+                accessibilityLabel={pickedPhoto ? 'Change photo' : 'Choose a photo'}
+                style={styles.photoPicker}
+              >
+                {pickedPhoto ? (
+                  <Image source={{ uri: pickedPhoto }} style={styles.previewImage} contentFit="cover" />
+                ) : (
+                  <View style={styles.photoEmpty}>
+                    <Icon3D name="camera" size={48} />
+                    <Body variant="button" color={colors.ocean}>
+                      Choose a photo
+                    </Body>
+                  </View>
+                )}
+              </PressableScale>
+              {pickedPhoto && (
+                <Body variant="small" color={colors.inkSoft} center>
+                  Tap the photo to change it.
+                </Body>
+              )}
+              <Button title="Send my photo" onPress={handleSubmit} loading={submitting} />
+            </View>
+          )}
 
-      {bothAnswered && (
-        <View style={styles.revealBox}>
-          <Text style={styles.revealHeading}>❤️ Both answered!</Text>
+          {!myResponse && responseType === 'song' && (
+            <View style={styles.answerBox}>
+              {pickedSong ? (
+                <SongCard song={pickedSong} onRemove={() => setPickedSong(null)} style={styles.songCard} />
+              ) : (
+                <Button title="Pick a song" icon="musicalNotes" variant="soft" onPress={() => setSongPickerOpen(true)} />
+              )}
+              <Button title="Send my song" onPress={handleSubmit} loading={submitting} disabled={!pickedSong} />
+            </View>
+          )}
 
-          <View style={styles.revealRow}>
-            <Text style={styles.revealLabel}>You</Text>
-            {myResponse.response && myResponse.response !== '📸' && (
-              <Text style={styles.revealText}>{myResponse.response}</Text>
-            )}
-          </View>
+          {!myResponse && responseType !== 'photo' && responseType !== 'song' && (
+            <View style={styles.answerBox}>
+              <Input
+                placeholder="Your answer…"
+                value={inputText}
+                onChangeText={setInputText}
+                multiline
+              />
+              <Button title="Send my answer" onPress={handleSubmit} loading={submitting} />
+            </View>
+          )}
 
-          <View style={styles.revealRow}>
-            <Text style={styles.revealLabel}>Them</Text>
-            {partnerResponse.response && partnerResponse.response !== '📸' && (
-              <Text style={styles.revealText}>{partnerResponse.response}</Text>
-            )}
-            {partnerMediaUrl && (
-              <Image source={{ uri: partnerMediaUrl }} style={styles.revealImage} />
-            )}
-          </View>
-        </View>
-      )}
+          {myResponse && !partnerResponse && (
+            <View style={styles.waiting}>
+              <PaperBoat width={width - GUTTER * 2} />
+              <Title variant="headingItalic" center style={styles.waitingTitle}>
+                Waiting for {names.partner}…
+              </Title>
+              <Body color={colors.inkSoft} center>
+                Your answer is in. It'll open here the moment theirs arrives.
+              </Body>
+              <Button title="Check again" variant="soft" onPress={() => load(true)} style={styles.checkAgain} />
+            </View>
+          )}
+
+          {bothAnswered && reveal === 'envelopes' && (
+            <EnvelopeReveal
+              key={activityId}
+              myName={names.me}
+              partnerName={names.partner}
+              mine={toRevealAnswer(myResponse, null)}
+              theirs={toRevealAnswer(partnerResponse, partnerMediaUrl)}
+              matching={answersMatch(myResponse, partnerResponse)}
+              autoOpen={arrivedLive.current}
+              onDone={finishReveal}
+            />
+          )}
+
+          {bothAnswered && reveal === 'static' && (
+            // After the envelope moment has been seen once: the revealed answers, calmly.
+            <Animated.View entering={FadeInDown.duration(ENTRANCE_DURATION)} style={styles.reveal}>
+              <View style={styles.revealHeader}>
+                <Icon3D name="sparklingHeart" size={56} />
+                <Title variant="titleItalic" color={colors.coral} center>
+                  You both answered!
+                </Title>
+              </View>
+
+              {answersMatch(myResponse, partnerResponse) && (
+                <Title variant="headingItalic" center>
+                  Same brain again 😂❤️
+                </Title>
+              )}
+              {myResponse.song || partnerResponse.song ? (
+                <>
+                  <View style={styles.songPair}>
+                    <View style={styles.flex}>
+                      <Body variant="label" color={colors.inkSoft} center>
+                        You
+                      </Body>
+                      {myResponse.song ? <SongCard song={myResponse.song} compact style={styles.songCompact} /> : null}
+                    </View>
+                    <View style={styles.flex}>
+                      <Body variant="label" color={colors.inkSoft} center>
+                        Them
+                      </Body>
+                      {partnerResponse.song ? <SongCard song={partnerResponse.song} compact style={styles.songCompact} /> : null}
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <AnswerNote
+                    who="You"
+                    text={myResponse.response !== '📸' ? myResponse.response : null}
+                    tilt={-1.5}
+                    tint={colors.warmWhite}
+                  />
+                  <AnswerNote
+                    who="Them"
+                    text={partnerResponse.response !== '📸' ? partnerResponse.response : null}
+                    imageUrl={partnerMediaUrl}
+                    tilt={1.2}
+                    tint={colors.sand}
+                  />
+                </>
+              )}
+            </Animated.View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+      <SongPicker visible={songPickerOpen} onClose={() => setSongPickerOpen(false)} onChoose={setPickedSong} />
+    </ScreenBackground>
+  );
+}
+
+function toRevealAnswer(r: any, imageUrl: string | null): RevealAnswer {
+  const text = r?.response && r.response !== '📸' && r.response !== '🎵' ? r.response : null;
+  return { text, song: r?.song ?? null, imageUrl };
+}
+
+function sentenceCase(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+// Each answer is a handwritten note (Caveat — it's a personal note).
+function AnswerNote({
+  who,
+  text,
+  imageUrl,
+  tilt,
+  tint,
+}: {
+  who: string;
+  text?: string | null;
+  imageUrl?: string | null;
+  tilt: number;
+  tint: string;
+}) {
+  return (
+    <View style={[styles.answerNote, { backgroundColor: tint, transform: [{ rotate: `${tilt}deg` }] }]}>
+      <Body variant="label" color={colors.inkSoft}>
+        {who}
+      </Body>
+      {text ? <Handwritten style={styles.answerText}>{text}</Handwritten> : null}
+      {imageUrl ? (
+        <Image source={{ uri: imageUrl }} style={styles.revealImage} contentFit="cover" />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#071A2B', padding: 24, paddingTop: 80 },
-  center: { flex: 1, backgroundColor: '#071A2B', justifyContent: 'center', alignItems: 'center' },
-  category: { color: '#FF6B6B', fontSize: 13, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
-  prompt: { color: '#FFF8EF', fontSize: 20, fontWeight: '600', marginBottom: 8 },
-  description: { color: '#7EC8E3', fontSize: 15, lineHeight: 21, marginBottom: 16 },
-  statusText: { color: '#FF6B6B', fontSize: 14, fontWeight: '600', marginBottom: 16 },
-  voiceNote: { color: '#7EC8E399', fontSize: 13, fontStyle: 'italic', marginBottom: 16 },
-  answerBox: {},
-  input: {
-    backgroundColor: '#126E82',
-    color: '#FFF8EF',
-    borderRadius: 12,
-    padding: 14,
-    minHeight: 100,
-    textAlignVertical: 'top',
-    marginBottom: 14,
-  },
-  pickButton: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    padding: 14,
+  flex: { flex: 1 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  content: { paddingHorizontal: GUTTER },
+  promptWrap: { marginTop: space.lg },
+  bottle: { position: 'absolute', top: -28, right: space.md, zIndex: 1, transform: [{ rotate: '18deg' }] },
+  promptCard: { padding: space.xl, transform: [{ rotate: '-0.8deg' }] },
+  promptTape: { position: 'absolute', top: -10, left: space.xl },
+  prompt: { marginTop: space.xs },
+  description: { marginTop: space.sm },
+  status: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#7EC8E3',
+    gap: space.sm,
+    marginTop: space.xl,
   },
-  pickButtonText: { color: '#7EC8E3', fontWeight: '600' },
-  previewImage: { width: '100%', height: 200, borderRadius: 12, marginBottom: 14 },
-  button: { backgroundColor: '#FF6B6B', borderRadius: 12, padding: 16, alignItems: 'center' },
-  buttonText: { color: '#FFF8EF', fontWeight: '600', fontSize: 16 },
-  waitingBox: { alignItems: 'center', marginTop: 20 },
-  waitingText: { color: '#FFF8EF', fontSize: 15, textAlign: 'center', marginBottom: 16 },
-  refreshButton: {
-    borderWidth: 1,
-    borderColor: '#7EC8E3',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+  voiceNote: { marginTop: space.sm },
+  answerBox: { marginTop: space.xl, gap: space.md },
+  songCard: { marginLeft: space.xl },
+  songPair: { flexDirection: 'row', gap: space.md },
+  songCompact: { marginTop: space.xs },
+  photoPicker: {
+    backgroundColor: colors.warmWhite,
+    padding: space.sm,
+    paddingBottom: space.xl,
+    borderRadius: radius.photo,
+    alignSelf: 'center',
+    transform: [{ rotate: '1.5deg' }],
+    ...shadows.paper,
   },
-  refreshText: { color: '#7EC8E3', fontWeight: '600' },
-  revealBox: { marginTop: 10 },
-  revealHeading: { color: '#FFF8EF', fontSize: 18, fontWeight: '600', marginBottom: 16, textAlign: 'center' },
-  revealRow: { backgroundColor: '#126E82', borderRadius: 12, padding: 16, marginBottom: 12 },
-  revealLabel: { color: '#FF6B6B', fontWeight: '700', marginBottom: 6 },
-  revealText: { color: '#FFF8EF', fontSize: 15, lineHeight: 21 },
-  revealImage: { width: '100%', height: 200, borderRadius: 8, marginTop: 10 },
+  photoEmpty: {
+    width: 220,
+    height: 220,
+    backgroundColor: colors.paperDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+  },
+  previewImage: { width: 220, height: 220 },
+  waiting: { alignItems: 'center', marginTop: space.xxl, gap: space.xs },
+  waitingTitle: { marginTop: space.md },
+  checkAgain: { marginTop: space.xl },
+  reveal: { marginTop: space.xxl, gap: space.xl },
+  revealHeader: { alignItems: 'center', gap: space.sm },
+  answerNote: {
+    padding: space.xl,
+    borderRadius: radius.paper,
+    ...shadows.paper,
+  },
+  answerText: { marginTop: space.xs },
+  revealImage: {
+    width: '100%',
+    height: 240,
+    borderRadius: radius.photo,
+    marginTop: space.md,
+  },
 });

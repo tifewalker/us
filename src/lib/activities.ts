@@ -1,14 +1,11 @@
-import { decode } from 'base64-arraybuffer';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import type { Song } from './music';
+import { localDateString } from './dates';
 import { supabase } from './supabase';
-
-function todayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import { uploadLocalFile } from './upload';
 
 export async function getTodayActivity(coupleId: string) {
-  const today = todayDateString();
+  const today = localDateString();
 
   const { data: existing, error: fetchError } = await supabase
     .from('daily_activities')
@@ -70,22 +67,14 @@ export async function uploadActivityResponseMedia(params: {
   const fileName = `${Date.now()}-${Math.floor(Math.random() * 10000)}.jpg`;
   const storagePath = `${params.coupleId}/activity-responses/${params.dailyActivityId}/${fileName}`;
 
-  const base64 = await FileSystem.readAsStringAsync(manipulated.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-
-  const { error: uploadError } = await supabase.storage
-    .from('memory-media')
-    .upload(storagePath, decode(base64), { contentType: 'image/jpeg' });
-
-  if (uploadError) throw uploadError;
-  return storagePath;
+  return uploadLocalFile({ localUri: manipulated.uri, path: storagePath });
 }
 
 export async function submitActivityResponse(
   dailyActivityId: string,
   response: string,
-  mediaPath?: string
+  mediaPath?: string,
+  song?: Song | null
 ) {
   const { data: authData } = await supabase.auth.getUser();
   if (!authData.user) throw new Error('Not signed in');
@@ -93,6 +82,7 @@ export async function submitActivityResponse(
   const payload = {
     response,
     media_url: mediaPath ?? null,
+    song: song ?? null,
     completed_at: new Date().toISOString(),
   };
 

@@ -30,7 +30,8 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files (never commit real values — see .env.example)
+.env
 .env*.local
 
 # typescript
@@ -41,3 +42,6 @@ example
 # generated native folders
 /ios
 /android
+
+# Vercel CLI project link
+.vercel/

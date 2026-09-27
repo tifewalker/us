@@ -1,40 +1,21 @@
 import { supabase } from "./supabase";
 
-// Simple readable invite code, e.g. "BLUE-OCEAN-4821"
-function generateInviteCode(): string {
-  const words = [
-    "BLUE",
-    "OCEAN",
-    "CORAL",
-    "SUNSET",
-    "PALM",
-    "WAVE",
-    "STAR",
-    "BEACH",
-  ];
-  const word1 = words[Math.floor(Math.random() * words.length)];
-  const word2 = words[Math.floor(Math.random() * words.length)];
-  const num = Math.floor(1000 + Math.random() * 9000);
-  return `${word1}-${word2}-${num}`;
-}
-
+// Creates via the create_couple RPC (migration 010), which refuses if you're
+// already paired and generates the invite code (e.g. "BLUE-OCEAN-4821") server-side.
 export async function createCouple(relationshipStart: string) {
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error("Not signed in");
+  const { data, error } = await supabase.rpc("create_couple", {
+    start_date: relationshipStart, // 'YYYY-MM-DD'
+  });
 
-  const inviteCode = generateInviteCode();
-
-  const { data, error } = await supabase
-    .from("couples")
-    .insert({
-      partner_one: authData.user.id,
-      relationship_start: relationshipStart, // 'YYYY-MM-DD'
-      invite_code: inviteCode,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
+  if (error) {
+    if (error.message.includes("already in a couple")) {
+      throw new Error("You're already paired.");
+    }
+    if (error.message.includes("not authenticated")) {
+      throw new Error("Not signed in");
+    }
+    throw error;
+  }
   return data; // includes data.invite_code to show/share
 }
 
