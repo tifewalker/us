@@ -57,7 +57,7 @@ function parseDate(dateStr: string | null, createdAt: string): Date {
 function clusterPaths(media: MediaRow[]) {
   return media
     .slice(0, 3)
-    .map((m) => (m.media_type === "photo" ? m.storage_path : m.thumbnail_path))
+    .map((m) => m.thumbnail_path ?? (m.media_type === "photo" ? m.storage_path : null)) // the 720px thumb
     .filter((p): p is string => !!p);
 }
 
@@ -189,7 +189,7 @@ export default function Story() {
           );
         case "memory": {
           const photos: ClusterPhoto[] = item.entry.media.slice(0, 3).map((m) => {
-            const path = m.media_type === "photo" ? m.storage_path : m.thumbnail_path;
+            const path = m.thumbnail_path ?? (m.media_type === "photo" ? m.storage_path : null);
             return {
               id: m.id,
               uri: path ? (urls[path] ?? null) : null,

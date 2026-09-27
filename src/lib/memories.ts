@@ -3,6 +3,7 @@ import * as VideoThumbnails from "expo-video-thumbnails";
 import { supabase } from "./supabase";
 import type { Song } from "./music";
 import { Platform } from "react-native";
+import { forgetSigned, signPathsCached } from "./signedUrls";
 import { uploadLocalFile, videoExtension } from "./upload";
 import { asVoiceNote, asWaveform, uploadVoice, type LocalVoice } from "./voice";
 
@@ -100,9 +101,42 @@ export type MediaRef = {
   waveform?: number[] | null; // voice notes only (018)
 };
 
-// Uploads one local photo/video (+ a thumbnail for videos) into `folder` and
-// returns where it went. Photos are converted to JPEG (HEIC fix); files stream
-// from disk (upload.ts), never through JS memory. Used for memories
+// Photo sizes. iPhone photos are ~4000×3000 (3–5 MB); we keep a 2048px
+// version (~0.4–0.8 MB, sharp full-screen on any phone) and a 720px thumbnail
+// (~60–120 KB) that grids, collages, the Story tab and the beach use.
+export const PHOTO_MAX = 2048;
+export const THUMB_MAX = 720;
+
+function fitWithin(w: number, h: number, max: number) {
+  if (!w || !h || (w <= max && h <= max)) return null;
+  return w >= h ? { width: max } : { height: max };
+}
+
+// → a JPEG at most PHOTO_MAX on its long edge (also converts HEIC — iPhones
+// default to it, and Storage would serve it with a mismatched content type)
+// plus a THUMB_MAX thumbnail made from that.
+export async function preparePhoto(uri: string, width?: number | null, height?: number | null) {
+  let w = width ?? 0;
+  let h = height ?? 0;
+  let source = uri;
+  if (!w || !h) {
+    // size unknown (some callers): one plain pass to read it (and convert)
+    const probe = await ImageManipulator.manipulateAsync(uri, [], { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG });
+    source = probe.uri;
+    w = probe.width;
+    h = probe.height;
+  }
+  const fit = fitWithin(w, h, PHOTO_MAX);
+  const full = await ImageManipulator.manipulateAsync(source, fit ? [{ resize: fit }] : [], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG });
+  const thumbFit = fitWithin(full.width, full.height, THUMB_MAX);
+  const thumb = await ImageManipulator.manipulateAsync(full.uri, thumbFit ? [{ resize: thumbFit }] : [], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG });
+  return { fullUri: full.uri, thumbUri: thumb.uri };
+}
+
+// Uploads one local photo/video (+ a thumbnail) into `folder` and returns
+// where it went. Photos are resized + converted to JPEG (preparePhoto) and get
+// a thumb_ file too; videos get their frame thumbnail. Files stream from disk
+// (upload.ts), never through JS memory. Used for memories
 // (<couple_id>/<memory_id>) and sealed gifts (<couple_id>/sealed/<bottle_id>).
 export async function uploadMediaFile(params: {
   folder: string;
@@ -111,22 +145,19 @@ export async function uploadMediaFile(params: {
   durationMs?: number | null;
   thumbnailUri?: string;
   mimeType?: string | null; // from the picker; needed on web (blob: uris have no extension)
+  width?: number | null; // from the picker (photos) — saves a decode pass
+  height?: number | null;
   onProgress?: (fraction: number) => void;
 }): Promise<MediaRef> {
   const baseName = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   let uploadUri = params.localUri;
   let ext = params.mediaType === "video" ? videoExtension(params.localUri, params.mimeType) : "jpg";
+  let photoThumbUri: string | null = null;
 
   if (params.mediaType === "photo") {
-    // Convert every photo to JPEG regardless of source format (iPhones
-    // default to HEIC, which Storage would otherwise serve back with a
-    // mismatched content-type, causing <Image> to silently fail to render).
-    const manipulated = await ImageManipulator.manipulateAsync(
-      params.localUri,
-      [],
-      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
-    );
-    uploadUri = manipulated.uri;
+    const prepared = await preparePhoto(params.localUri, params.width, params.height);
+    uploadUri = prepared.fullUri;
+    photoThumbUri = prepared.thumbUri;
     ext = "jpg";
   }
 
@@ -137,6 +168,14 @@ export async function uploadMediaFile(params: {
   });
 
   let thumbnailPath: string | null = null;
+  if (params.mediaType === "photo" && photoThumbUri) {
+    // a missing thumbnail just means tiles load the full photo
+    try {
+      thumbnailPath = await uploadLocalFile({ localUri: photoThumbUri, path: `${params.folder}/thumb_${baseName}.jpg` });
+    } catch (err: any) {
+      console.log("[uploadMediaFile] photo thumbnail failed:", err.message);
+    }
+  }
   if (params.mediaType === "video") {
     // A missing thumbnail shouldn't lose the video — the grid falls back to a placeholder.
     try {
@@ -171,7 +210,12 @@ export async function uploadMemoryMedia(params: {
   durationMs?: number | null; // from the picker asset (videos)
   thumbnailUri?: string; // local video thumbnail, if already generated
   mimeType?: string | null;
+  width?: number | null;
+  height?: number | null;
   caption?: string;
+  // Uploads run in parallel; this keeps the memory in the order you picked
+  // (memory_media is ordered by created_at).
+  createdAt?: string;
   onProgress?: (fraction: number) => void;
 }) {
   const { data: authData } = await supabase.auth.getUser();
@@ -184,6 +228,8 @@ export async function uploadMemoryMedia(params: {
     durationMs: params.durationMs,
     thumbnailUri: params.thumbnailUri,
     mimeType: params.mimeType,
+    width: params.width,
+    height: params.height,
     onProgress: params.onProgress,
   });
   const storagePath = ref.storage_path;
@@ -200,6 +246,7 @@ export async function uploadMemoryMedia(params: {
         params.durationMs != null ? Math.round(params.durationMs / 1000) : null,
       caption: params.caption ?? null,
       created_by: authData.user.id,
+      ...(params.createdAt ? { created_at: params.createdAt } : {}),
     })
     .select()
     .single();
@@ -238,35 +285,20 @@ export async function addMemoryVoice(params: {
 }
 
 // Returns a temporary signed URL for displaying a private media file.
-export async function getSignedMediaUrl(
-  storagePath: string,
-  expiresInSeconds = 3600,
-) {
-  const { data, error } = await supabase.storage
-    .from("memory-media")
-    .createSignedUrl(storagePath, expiresInSeconds);
-
-  if (error) throw error;
-  return data.signedUrl;
+// (Cached — see lib/signedUrls.ts. The expiry argument is kept for callers but
+// the cache always hands out its week-long URL.)
+export async function getSignedMediaUrl(storagePath: string, _expiresInSeconds = 3600) {
+  const url = (await signPathsCached([storagePath]))[storagePath];
+  if (!url) throw new Error("Couldn't open that file.");
+  return url;
 }
 
 // Signs many files in ONE request (createSignedUrls). Returns path → URL;
 // paths that fail to sign (e.g. missing) are simply absent from the map.
-export async function signPaths(
-  paths: string[],
-  expiresInSeconds = 3600,
-): Promise<Record<string, string>> {
-  const unique = [...new Set(paths.filter(Boolean))];
-  if (unique.length === 0) return {};
-  const { data, error } = await supabase.storage
-    .from("memory-media")
-    .createSignedUrls(unique, expiresInSeconds);
-  if (error) throw error;
-  const out: Record<string, string> = {};
-  for (const item of data ?? []) {
-    if (item.signedUrl && item.path) out[item.path] = item.signedUrl;
-  }
-  return out;
+// Stable, cached URLs (lib/signedUrls.ts) so the browser / expo-image cache
+// actually hits. The expiry argument is ignored (kept for existing callers).
+export async function signPaths(paths: string[], _expiresInSeconds = 3600): Promise<Record<string, string>> {
+  return signPathsCached(paths);
 }
 
 export type MemoryMediaRow = {
@@ -314,9 +346,10 @@ export async function resolveMedia(
       id: m.id,
       type: m.media_type,
       url,
-      thumbUrl: isPhoto ? url : m.thumbnail_path ? (urls[m.thumbnail_path] ?? null) : null,
+      // photos: the 720px thumb when there is one (older uploads: the photo itself)
+      thumbUrl: m.thumbnail_path ? (urls[m.thumbnail_path] ?? (isPhoto ? url : null)) : isPhoto ? url : null,
       cacheKey: m.storage_path,
-      thumbCacheKey: isPhoto ? m.storage_path : m.thumbnail_path,
+      thumbCacheKey: m.thumbnail_path && urls[m.thumbnail_path] ? m.thumbnail_path : isPhoto ? m.storage_path : null,
       storagePath: m.storage_path,
       thumbnailPath: m.thumbnail_path,
       durationSeconds: m.duration_seconds,
@@ -394,9 +427,11 @@ async function removeFiles(paths: string[]): Promise<string[]> {
   const { data, error } = await supabase.storage.from("memory-media").remove(paths);
   if (error) throw new Error(`Couldn't remove the files: ${error.message}`);
   const removed = new Set((data ?? []).map((o: any) => o.name));
+  forgetSigned(paths);
   const unconfirmed = paths.filter((p) => !removed.has(p));
   if (unconfirmed.length === 0) return [];
-  const stillThere = await signPaths(unconfirmed, 60).catch(() => ({}) as Record<string, string>);
+  // must NOT use the URL cache: this checks whether the file still exists
+  const stillThere = await signPathsCached(unconfirmed, { fresh: true, seconds: 60 }).catch(() => ({}) as Record<string, string>);
   return unconfirmed.filter((p) => stillThere[p]);
 }
 

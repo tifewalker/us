@@ -2,10 +2,12 @@ import { Body, PressableScale, Sheet, Title } from "@/components/ui";
 import { formatSeconds, type ResolvedMedia } from "@/lib/memories";
 import { colors, radius, space, type as typeScale } from "@/theme";
 import { Image } from "expo-image";
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { FlatList, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 // A neat grid of everything in the memory (opened from the "+N more" stack).
-// Tap = open in the viewer; long-press = remove from memory.
+// Tap = open in the viewer; long-press = remove from memory. A virtualized
+// FlatList of 720px thumbnails, so a memory with 200 photos only loads what's
+// on screen.
 export function MediaGrid({
   visible,
   items,
@@ -30,10 +32,19 @@ export function MediaGrid({
       <Body variant="small" color={colors.inkSoft} style={styles.hint}>
         Long-press a photo to take it out.
       </Body>
-      <ScrollView style={{ maxHeight: height * 0.6 }} contentContainerStyle={[styles.grid, { gap }]}>
-        {items.map((m, i) => (
+      <FlatList
+        data={items}
+        keyExtractor={(m) => m.id}
+        numColumns={cols}
+        style={{ maxHeight: height * 0.6 }}
+        columnWrapperStyle={{ gap }}
+        contentContainerStyle={[styles.grid, { gap }]}
+        initialNumToRender={18}
+        maxToRenderPerBatch={18}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: m, index: i }) => (
           <PressableScale
-            key={m.id}
             onPress={() => onOpen(i)}
             onLongPress={() => onLongPress(i)}
             delayLongPress={450}
@@ -58,15 +69,15 @@ export function MediaGrid({
               )}
             </View>
           </PressableScale>
-        ))}
-      </ScrollView>
+        )}
+      />
     </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
   hint: { marginTop: space.xs, marginBottom: space.md },
-  grid: { flexDirection: "row", flexWrap: "wrap", paddingBottom: space.md },
+  grid: { paddingBottom: space.md },
   cell: { borderRadius: radius.photo, overflow: "hidden", backgroundColor: colors.paperDeep },
   badge: {
     position: "absolute",

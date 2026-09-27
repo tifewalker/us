@@ -1,5 +1,5 @@
 import type { VoiceNote } from './voice';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { preparePhoto } from './memories';
 import type { Song } from './music';
 import { localDateString } from './dates';
 import { supabase } from './supabase';
@@ -59,11 +59,9 @@ export async function uploadActivityResponseMedia(params: {
   dailyActivityId: string;
   localUri: string;
 }) {
-  const manipulated = await ImageManipulator.manipulateAsync(
-    params.localUri,
-    [],
-    { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-  );
+  // same 2048px JPEG as memory photos (iPhone originals are 3–5 MB)
+  const { fullUri } = await preparePhoto(params.localUri);
+  const manipulated = { uri: fullUri };
 
   const { data: authData } = await supabase.auth.getUser();
   if (!authData.user) throw new Error('Not signed in');

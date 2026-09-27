@@ -142,12 +142,14 @@ export default function WriteBottle() {
         openWhenLabel: isOpenWhen ? label : null,
       });
       const added: MediaRef[] = [];
-      const failed = await media.uploadEach(async (asset, mediaType, onProgress) => {
-        added.push(await addGiftMedia(saved, { uri: asset.uri, mediaType, durationMs: asset.duration, thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType }, onProgress));
-      }, async (voice, onProgress) => {
-        added.push(await addGiftVoice(saved, voice, onProgress));
+      // uploads run in parallel; slot each result by its picked position
+      const failed = await media.uploadEach(async (asset, mediaType, onProgress, position) => {
+        added[position] = await addGiftMedia(saved, { uri: asset.uri, mediaType, durationMs: asset.duration, thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType, width: asset.width, height: asset.height }, onProgress);
+      }, async (voice, onProgress, position) => {
+        added[position] = await addGiftVoice(saved, voice, onProgress);
       });
-      if (added.length) await setGiftMedia(saved.id, [...existing, ...added]);
+      const uploaded = added.filter(Boolean);
+      if (uploaded.length) await setGiftMedia(saved.id, [...existing, ...uploaded]);
       media.clear();
       if (failed.length) Alert.alert("Sent, but some files didn't upload", failed.join("\n"));
       setThrowing({ toJar: isOpenWhen });

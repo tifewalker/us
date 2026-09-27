@@ -85,7 +85,7 @@ export function MediaTray({
             <View
               style={[
                 styles.progressFill,
-                { width: `${Math.round(((progress.index - 1 + progress.fraction) / progress.total) * 100)}%` },
+                { width: `${Math.round(progress.fraction * 100)}%` },
               ]}
             />
           </View>

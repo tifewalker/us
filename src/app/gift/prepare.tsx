@@ -131,14 +131,18 @@ export default function PrepareGift() {
       });
       // 2. new media into <couple>/sealed/<gift>/, then 3. record them on the gift
       const added: MediaRef[] = [];
-      const failed = await media.uploadEach(async (asset, mediaType, onProgress) => {
-        added.push(
-          await addGiftMedia(saved, { uri: asset.uri, mediaType, durationMs: asset.duration, thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType }, onProgress),
+      // uploads run in parallel; slot each result by its picked position
+      const failed = await media.uploadEach(async (asset, mediaType, onProgress, position) => {
+        added[position] = await addGiftMedia(
+          saved,
+          { uri: asset.uri, mediaType, durationMs: asset.duration, thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType, width: asset.width, height: asset.height },
+          onProgress,
         );
-      }, async (voice, onProgress) => {
-        added.push(await addGiftVoice(saved, voice, onProgress));
+      }, async (voice, onProgress, position) => {
+        added[position] = await addGiftVoice(saved, voice, onProgress);
       });
-      if (added.length) await setGiftMedia(saved.id, [...existing, ...added]);
+      const uploaded = added.filter(Boolean);
+      if (uploaded.length) await setGiftMedia(saved.id, [...existing, ...uploaded]);
       media.clear();
       if (failed.length) {
         Alert.alert("Sealed, but some files didn't upload", failed.join("\n"));

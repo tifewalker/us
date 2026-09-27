@@ -117,7 +117,7 @@ export async function saveGift(params: {
 // policy can_write_sealed) and append it to the gift's media list.
 export async function addGiftMedia(
   gift: Gift,
-  asset: { uri: string; mediaType: MediaType; durationMs?: number | null; thumbnailUri?: string; mimeType?: string | null },
+  asset: { uri: string; mediaType: MediaType; durationMs?: number | null; thumbnailUri?: string; mimeType?: string | null; width?: number | null; height?: number | null },
   onProgress?: (f: number) => void,
 ): Promise<MediaRef> {
   const ref = await uploadMediaFile({
@@ -127,6 +127,8 @@ export async function addGiftMedia(
     durationMs: asset.durationMs,
     thumbnailUri: asset.thumbnailUri,
     mimeType: asset.mimeType,
+    width: asset.width,
+    height: asset.height,
     onProgress,
   });
   return ref;
@@ -183,9 +185,9 @@ export async function resolveGiftMedia(media: MediaRef[]): Promise<ResolvedMedia
       id: m.storage_path,
       type: m.media_type,
       url: urls[m.storage_path],
-      thumbUrl: m.media_type === "photo" ? urls[m.storage_path] : m.thumbnail_path ? (urls[m.thumbnail_path] ?? null) : null,
+      thumbUrl: m.thumbnail_path ? (urls[m.thumbnail_path] ?? (m.media_type === "photo" ? urls[m.storage_path] : null)) : m.media_type === "photo" ? urls[m.storage_path] : null,
       cacheKey: m.storage_path,
-      thumbCacheKey: m.media_type === "photo" ? m.storage_path : m.thumbnail_path,
+      thumbCacheKey: m.thumbnail_path && urls[m.thumbnail_path] ? m.thumbnail_path : m.media_type === "photo" ? m.storage_path : null,
       storagePath: m.storage_path,
       thumbnailPath: m.thumbnail_path,
       durationSeconds: m.duration_seconds,

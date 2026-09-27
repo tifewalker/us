@@ -9,7 +9,11 @@ export type PickedAsset = ImagePicker.ImagePickerAsset & {
   thumbnailUri?: string; // local JPEG preview for videos
 };
 
+// index = "Uploading N of M" (files finished + 1), fraction = overall 0..1
 export type UploadProgress = { index: number; total: number; fraction: number };
+
+// Parallel uploads: fast on wifi, gentle enough on a phone connection.
+const UPLOAD_CONCURRENCY = 3;
 
 // Shared by "New memory" and "Add photos or videos": picking (720p video
 // re-encode on iOS, size limit, local thumbnails) and sequential upload with
@@ -107,55 +111,83 @@ export function useMediaPicker(logTag = "MediaPicker") {
   // Runs `upload` for every picked asset (then `uploadVoiceNote` for every
   // recorded voice note, if given), one after another, with per-file
   // progress. Returns human-readable labels for the files that failed.
+  // Runs `upload` for every picked asset (then `uploadVoiceNote` for every
+  // recorded voice note, if given) with UPLOAD_CONCURRENCY at a time — 100–200
+  // photos no longer upload strictly one by one. Progress: `index` = files
+  // finished (+1, for "Uploading N of M"), `fraction` = overall 0..1.
+  // `upload` gets the item's position so callers can keep the picked order.
+  // A failed file never stops the rest; returns labels for the failures.
   async function uploadEach(
-    upload: (asset: PickedAsset, mediaType: "photo" | "video", onProgress: (f: number) => void) => Promise<void>,
-    uploadVoiceNote?: (voice: LocalVoice, onProgress: (f: number) => void) => Promise<void>,
+    upload: (asset: PickedAsset, mediaType: "photo" | "video", onProgress: (f: number) => void, position: number) => Promise<void>,
+    uploadVoiceNote?: (voice: LocalVoice, onProgress: (f: number) => void, position: number) => Promise<void>,
   ): Promise<string[]> {
-    const total = assets.length + (uploadVoiceNote ? voices.length : 0);
+    type Job = { label: string; run: (onProgress: (f: number) => void) => Promise<void> };
+    const jobs: Job[] = assets.map((asset, i) => {
+      const mediaType = asset.type === "video" ? "video" : "photo";
+      return {
+        label: `${mediaType === "video" ? "Video" : "Photo"} ${i + 1}`,
+        run: (onProgress) => upload(asset, mediaType, onProgress, i),
+      };
+    });
+    if (uploadVoiceNote) {
+      voices.forEach((voice, j) =>
+        jobs.push({ label: `Voice note ${j + 1}`, run: (onProgress) => uploadVoiceNote(voice, onProgress, assets.length + j) }),
+      );
+    }
+    const total = jobs.length;
     const failed: string[] = [];
-    try {
-      for (const [i, asset] of assets.entries()) {
-        const mediaType = asset.type === "video" ? "video" : "photo";
-        const label = `${mediaType === "video" ? "Video" : "Photo"} ${i + 1}`;
-        setProgress({ index: i + 1, total, fraction: 0 });
+    const fractions = new Array<number>(total).fill(0);
+    let done = 0;
+    let next = 0;
+    const report = () =>
+      setProgress({ index: Math.min(total, done + 1), total, fraction: fractions.reduce((a, b) => a + b, 0) / Math.max(1, total) });
+    report();
+    const worker = async () => {
+      while (next < total) {
+        const i = next++;
         try {
-          await upload(asset, mediaType, (f) => setProgress({ index: i + 1, total, fraction: f }));
+          await jobs[i].run((f) => {
+            fractions[i] = f;
+            report();
+          });
         } catch (err: any) {
-          console.log(`[${logTag}] ${label} failed:`, err.message);
-          failed.push(`${label}: ${err.message ?? String(err)}`);
+          console.log(`[${logTag}] ${jobs[i].label} failed:`, err.message);
+          failed.push(`${jobs[i].label}: ${err.message ?? String(err)}`);
         }
+        fractions[i] = 1;
+        done++;
+        report();
       }
-      if (uploadVoiceNote) {
-        for (const [j, voice] of voices.entries()) {
-          const i = assets.length + j;
-          const label = `Voice note ${j + 1}`;
-          setProgress({ index: i + 1, total, fraction: 0 });
-          try {
-            await uploadVoiceNote(voice, (f) => setProgress({ index: i + 1, total, fraction: f }));
-          } catch (err: any) {
-            console.log(`[${logTag}] ${label} failed:`, err.message);
-            failed.push(`${label}: ${err.message ?? String(err)}`);
-          }
-        }
-      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, total) }, worker));
     } finally {
       setProgress(null);
     }
     return failed;
   }
 
-  // Uploads every picked asset into a memory (memory_media rows).
+  // Uploads every picked asset into a memory (memory_media rows). created_at
+  // is set from the picked position so the memory keeps your order even
+  // though uploads finish out of order.
   function uploadAll(coupleId: string, memoryId: string): Promise<string[]> {
-    return uploadEach((asset, mediaType, onProgress) =>
-      uploadMemoryMedia({
-        coupleId,
-        memoryId,
-        localUri: asset.uri,
-        mediaType,
-        durationMs: asset.duration,
-        thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType,
-        onProgress,
-      }).then(() => undefined),
+    const t0 = Date.now();
+    const at = (position: number) => new Date(t0 + position).toISOString();
+    return uploadEach(
+      (asset, mediaType, onProgress, position) =>
+        uploadMemoryMedia({
+          coupleId,
+          memoryId,
+          localUri: asset.uri,
+          mediaType,
+          durationMs: asset.duration,
+          thumbnailUri: asset.thumbnailUri,
+          mimeType: asset.mimeType,
+          width: asset.width,
+          height: asset.height,
+          createdAt: at(position),
+          onProgress,
+        }).then(() => undefined),
       (voice, onProgress) => addMemoryVoice({ coupleId, memoryId, voice, onProgress }).then(() => undefined),
     );
   }

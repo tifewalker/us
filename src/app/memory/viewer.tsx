@@ -28,6 +28,15 @@ export default function MediaViewer() {
   const [items, setItems] = useState<ResolvedMedia[] | null>(null);
   const [active, setActive] = useState(startIndex);
 
+  // warm the neighbours so swiping to the next / previous photo is instant
+  useEffect(() => {
+    if (!items) return;
+    const near = [items[active + 1], items[active - 1], items[active + 2]]
+      .filter((m): m is ResolvedMedia => !!m && m.type === "photo")
+      .map((m) => m.url);
+    if (near.length) Image.prefetch(near).catch(() => {});
+  }, [items, active]);
+
   useEffect(() => {
     if (!memoryId) return;
     (async () => {

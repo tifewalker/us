@@ -42,7 +42,7 @@ export async function getLatestMemory(coupleId: string) {
   return {
     id: data.id as string,
     title: data.title as string,
-    imagePath: (photo?.storage_path ?? video?.thumbnail_path ?? null) as string | null,
+    imagePath: (photo?.thumbnail_path ?? photo?.storage_path ?? video?.thumbnail_path ?? null) as string | null, // thumbs first
   };
 }
 
@@ -138,7 +138,7 @@ export async function getRememberPool(coupleId: string) {
       created_at: m.created_at as string,
       date: m.memory_date ? new Date(y, mo - 1, d) : new Date(m.created_at),
       song: m.song ?? null,
-      imagePath: (photo?.storage_path ?? video?.thumbnail_path ?? null) as string | null,
+      imagePath: (photo?.thumbnail_path ?? photo?.storage_path ?? video?.thumbnail_path ?? null) as string | null, // thumbs first
     };
   });
 }

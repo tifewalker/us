@@ -68,7 +68,8 @@ export async function uploadLocalFile(params: {
   const headers: Record<string, string> = {
     apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
     "content-type": contentTypeFor(params.path),
-    "cache-control": "max-age=3600",
+    // every upload has a unique name and never changes → cache for a year
+    "cache-control": "max-age=31536000",
     "x-upsert": "false",
   };
 

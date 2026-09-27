@@ -15,6 +15,7 @@ import {
   WashiTape,
 } from "@/components/ui";
 import { NotificationsSection } from "@/components/settings/NotificationsSection";
+import { clearSignedCache } from "@/lib/signedUrls";
 import { getCurrentUser, signOut } from "@/lib/auth";
 import {
   DELETE_WORLD_PHRASE,
@@ -155,6 +156,7 @@ export default function Settings() {
       const result = await deleteWorld(ids.coupleId);
       setDeleteStep(0);
       resetCoupleProfiles();
+      clearSignedCache();
       await signOut().catch(() => {});
       router.replace("/welcome");
       setTimeout(
@@ -175,6 +177,7 @@ export default function Settings() {
     setSigningOut(true);
     try {
       resetCoupleProfiles();
+      clearSignedCache();
       await signOut();
       // The (tabs) guard also redirects once the session clears, so this
       // is belt-and-braces; it won't bounce back because session is now null.
