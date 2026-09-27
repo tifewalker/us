@@ -1,3 +1,5 @@
+// Must be first: makes Alert.alert work on web (react-native-web stubs it out).
+import "@/lib/webAlert";
 import { InAppBannerHost } from "@/components/InAppBanner";
 import { InstallHint } from "@/components/InstallHint";
 import { stopPreview } from "@/lib/music";

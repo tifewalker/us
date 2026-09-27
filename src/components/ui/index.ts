@@ -5,6 +5,7 @@ export { EmptyState } from "./EmptyState";
 export { successHaptic, selectionHaptic, tapHaptic } from "./haptics";
 export { Icon3D, type Icon3DName } from "./Icon3D";
 export { Input } from "./Input";
+export { PasswordInput } from "./PasswordInput";
 export { PaperCard } from "./PaperCard";
 export { PaperTexture } from "./PaperTexture";
 export { Polaroid } from "./Polaroid";
