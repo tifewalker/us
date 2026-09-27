@@ -290,7 +290,7 @@ export async function notify(
 
 // Deliver queued (quiet-hours) events for anyone whose quiet hours are over.
 export async function flushQueue(admin: SupabaseClient) {
-  const { data: rows } = await admin.from("notification_queue").select("id, user_id, payload").order("created_at").limit(200);
+  const { data: rows } = await admin.from("notification_queue").select("id, user_id, payload, created_at").order("created_at").limit(200);
   if (!rows?.length) return 0;
   const people = await getPeople(admin, [...new Set(rows.map((r) => r.user_id))]);
   let sent = 0;
@@ -299,6 +299,10 @@ export async function flushQueue(admin: SupabaseClient) {
     if (!person) continue;
     const outcome = await notify(admin, person, r.payload as Message, { whenQuiet: "hold" });
     if (outcome === "held") continue; // still quiet
+    // No device yet (e.g. catch-up notifications queued for someone who hasn't
+    // turned notifications on): keep it for up to 3 days so it arrives once
+    // they do, then give up.
+    if (outcome === "no-devices" && Date.now() - Date.parse((r as any).created_at ?? "") < 3 * 86_400_000) continue;
     await admin.from("notification_queue").delete().eq("id", r.id);
     if (outcome === "sent") sent++;
   }

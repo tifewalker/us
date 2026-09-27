@@ -105,11 +105,18 @@ Deno.serve(async (req) => {
         break;
       }
       case "bottles": {
-        const { data: b } = await admin.from("bottles").select("id, recipient_id, kind").eq("id", ev.id).maybeSingle();
-        if (!b || b.kind !== "open_when") break;
+        const { data: b } = await admin.from("bottles").select("id, recipient_id, kind, unlock_at").eq("id", ev.id).maybeSingle();
+        if (!b) break;
         const people = await getPeople(admin, [b.recipient_id]);
         const p = people[b.recipient_id];
-        if (p) results.push(await notify(admin, p, { kind: "open_when_sent", refId: b.id, title: "A new 'Open when…' letter is in your jar 🫙", url: "/bottle/jar", category: "bottles_gifts" }));
+        if (!p) break;
+        if (b.kind === "open_when") {
+          results.push(await notify(admin, p, { kind: "open_when_sent", refId: b.id, title: "A new 'Open when…' letter is in your jar 🫙", url: "/bottle/jar", category: "bottles_gifts" }));
+        } else if (b.kind === "bottle" && b.unlock_at && Date.parse(b.unlock_at) <= Date.now() + 5_000) {
+          // sent "Now": it has already washed ashore — tell them right away
+          // (same kind + ref as notify-scheduled, so it's never sent twice)
+          results.push(await notify(admin, p, { kind: "bottle_arrived", refId: b.id, title: "Something washed ashore for you 🌊", url: `/bottle/${b.id}`, category: "bottles_gifts" }));
+        }
         break;
       }
       default:
