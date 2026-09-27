@@ -1,3 +1,4 @@
+import { InAppBannerHost } from "@/components/InAppBanner";
 import { InstallHint } from "@/components/InstallHint";
 import { stopPreview } from "@/lib/music";
 import { colors, fontAssets } from "@/theme";
@@ -58,6 +59,8 @@ export default function RootLayout() {
       </Stack>
       {/* web only: one-time "Add Us to your home screen" hint in iOS Safari */}
       <InstallHint />
+      {/* in-app notification banners (pushes forwarded by sw.js + Realtime fallback) */}
+      <InAppBannerHost />
     </ThemeProvider>
   );
 }

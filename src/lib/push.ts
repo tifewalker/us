@@ -70,6 +70,18 @@ export function onNotificationNavigate(go: (url: string) => void) {
   return () => nav.serviceWorker.removeEventListener("message", handler);
 }
 
+// A push arrived while an Us window is open and visible: the service worker
+// forwards the payload so the app can show its in-app banner.
+export type PushPayload = { title: string; body?: string; url: string; tag: string };
+export function onPushMessage(handler: (p: PushPayload) => void) {
+  if (!isWeb || !nav?.serviceWorker) return () => {};
+  const h = (e: any) => {
+    if (e?.data?.type === "us:push" && e.data.payload) handler(e.data.payload as PushPayload);
+  };
+  nav.serviceWorker.addEventListener("message", h);
+  return () => nav.serviceWorker.removeEventListener("message", h);
+}
+
 // ---- status + subscribe ------------------------------------------------------------
 
 export async function getPushStatus(): Promise<PushStatus> {

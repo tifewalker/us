@@ -37,6 +37,9 @@ Deno.serve(async (req) => {
     const devices = await deliver(admin, user.id, { kind: `dev_${kind}`, refId: String(Date.now()), title: sample.title, url: sample.url, category: "system" });
     return json({ ok: true, devices });
   } catch (e) {
+    // e.g. "VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY secrets are missing" — log it so
+    // it shows in the function logs, not only in the response.
+    console.error("[notify-send]", e);
     return json({ error: String(e) }, 500);
   }
 });

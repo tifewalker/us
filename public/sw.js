@@ -8,6 +8,9 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 
 // Payload from supabase/functions/_shared/notify.ts:
 //   { title, body, url, tag }
+// ALWAYS shows a notification — iOS revokes the subscription if a push
+// doesn't. If an Us window is open and visible, it ALSO gets the payload
+// (postMessage "us:push") so the app can show its in-app banner.
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -24,7 +27,21 @@ self.addEventListener("push", (event) => {
     renotify: !!data.tag,
     data: { url: data.url || "/" },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options),
+      (async () => {
+        try {
+          const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+          for (const client of windows) {
+            if (client.focused || client.visibilityState === "visible") {
+              client.postMessage({ type: "us:push", payload: { title, body: options.body, url: options.data.url, tag: data.tag || "" } });
+            }
+          }
+        } catch (e) {}
+      })(),
+    ]),
+  );
 });
 
 // Tap → focus an open Us window and send it to the deep link (the app

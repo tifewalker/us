@@ -550,6 +550,17 @@ Order: **Our beginning → How we met → Our dates (+ A birthday surprise) → 
 - **The one-time card** (`NotifyPromptCard`): a warmWhite paper note with mint tape, tilted 0.8°. "Want to know when {Name} replies?" in Caveat, a reassuring line ("never what they wrote"), then "Not now" and "Yes, tell me". It shows on the today screen while you're waiting, and in Our bottles once you've sent one — only in the installed web app, and only until answered.
 - **Copy voice for notifications:** short, warm, first names, one emoji at most, and no guilt, streaks or task lists. Never private content. Anything spicy reads "Something's waiting for you 😏".
 
+## In-app banners
+
+While the app is open, a notification also shows as a paper note that slides down from the top, under the safe area:
+- **Look:** warmWhite, radius 6, floating shadow, tilted −0.6°. The 3D icon for its kind sits on the left (heart letter, sparkles, bottle, gift, cake, sun, camera, headphones, calendar), then the title in Caveat handSmall, with an optional line in Nunito small inkSoft.
+- **Behaviour:**
+  - a soft haptic on native;
+  - it auto-dismisses after about 5s;
+  - swipe up to dismiss, tap to open its screen;
+  - banners queue one at a time, and a banner is skipped if you're already on its screen.
+- Copy is the same as the push; spicy stays neutral.
+
 ## Avatars
 
 `Avatar` (ui): a round photo inside a warmWhite ring (ring ≈ size/18) with a lifted shadow. With no photo, it shows the first letter in Fraunces italic on sand. Sizes: 64 (Settings), 48 (Our beginning), 32 (Little things pages), 30 (the stamp on reveal envelopes, pinned to the envelope's bottom-right corner).
