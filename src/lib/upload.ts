@@ -13,6 +13,7 @@ const CONTENT_TYPES: Record<string, string> = {
   jpeg: "image/jpeg",
   mov: "video/quicktime",
   mp4: "video/mp4",
+  m4a: "audio/mp4", // voice notes (AAC in an MP4 container) — migration 018
 };
 
 // Lowercased extension from a uri/path, ignoring any query string.

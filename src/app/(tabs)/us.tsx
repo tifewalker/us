@@ -1,7 +1,16 @@
 import { DateSheet } from "@/components/dates/DateSheet";
 import { Beginning } from "@/components/moments/Beginning";
+import { BucketList } from "@/components/us/BucketList";
+import { Favorites } from "@/components/us/Favorites";
+import { LittleThings } from "@/components/us/LittleThings";
+import { OurYears } from "@/components/us/OurYears";
+import { NotifyPromptCard } from "@/components/settings/NotifyPromptCard";
+import { SectionHeading } from "@/components/us/SectionHeading";
+import { StatsLedger } from "@/components/us/StatsLedger";
+import { StoryPage } from "@/components/us/StoryPage";
 import {
     ActionSheet,
+    Avatar,
     Body,
     Button,
     ConfirmSheet,
@@ -38,6 +47,7 @@ import {
     saveMyWelcomeNote,
     type WelcomeNote,
 } from "@/lib/moments";
+import { refreshCoupleProfiles, useCoupleProfiles } from "@/lib/profile";
 import { colors, fonts, GUTTER, radius, shadows, space } from "@/theme";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -61,9 +71,10 @@ type UsData = {
   sent: Bottle[];
 };
 
-// Us tab: "Our beginning" (date, replay intro, per-person welcome notes),
-// "Our dates" (beginning, birthdays, custom — by next occurrence), and the
-// birthday surprise for your partner.
+// Us tab — scrapbook pages, one flowing into the next: Our beginning (date,
+// replay intro, welcome notes) → How we met → Our dates (+ birthday surprise)
+// → Our favorites → Little things → Bucket list → Our bottles → Our stats.
+// Each newer section loads itself; `refreshKey` bumps on every focus.
 export default function Us() {
   const insets = useSafeAreaInsets();
   const tabClearance = useTabBarClearance();
@@ -77,6 +88,8 @@ export default function Us() {
   const [sentMenu, setSentMenu] = useState<Bottle | null>(null);
   const [takeBack, setTakeBack] = useState<Bottle | null>(null);
   const [takingBack, setTakingBack] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const profiles = useCoupleProfiles();
 
   const load = useCallback(async () => {
     try {
@@ -118,6 +131,8 @@ export default function Us() {
   useFocusEffect(
     useCallback(() => {
       load();
+      refreshCoupleProfiles();
+      setRefreshKey((k) => k + 1);
     }, [load]),
   );
 
@@ -202,7 +217,12 @@ export default function Us() {
         <PaperCard style={styles.beginning}>
           <WashiTape color="sand" rotate={-4} style={styles.tape} />
           <View style={styles.row}>
-            <Icon3D name="beach" size={56} />
+            <View style={styles.pair}>
+              <Avatar url={profiles.me?.avatarUrl} cacheKey={profiles.me?.avatarPath} name={profiles.me?.firstName} size={48} />
+              {data.partnerId ? (
+                <Avatar url={profiles.partner?.avatarUrl} cacheKey={profiles.partner?.avatarPath} name={profiles.partner?.firstName} size={48} style={styles.pairSecond} />
+              ) : null}
+            </View>
             <View style={styles.flex}>
               <Body variant="label" color={colors.inkSoft}>
                 Our beginning
@@ -260,12 +280,13 @@ export default function Us() {
           )}
         </View>
 
+        {/* ---- How we met ---- */}
+        <SectionHeading icon="loveLetter" title="How we met" />
+        <StoryPage coupleId={data.coupleId} refreshKey={refreshKey} nameOf={(id) => (id === data.myId ? "you" : id ? partner : "—")} />
+
         {/* ---- Our dates ---- */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Title variant="headingItalic">Our dates</Title>
-            <Button title="Add" variant="text" onPress={() => setDateSheet({ open: true, editing: null })} />
-          </View>
+        <View>
+          <SectionHeading icon="calendar" title="Our dates" action="Add" onAction={() => setDateSheet({ open: true, editing: null })} />
           {upcoming.map((u) => (
             <PressableScale
               key={u.key}
@@ -290,70 +311,13 @@ export default function Us() {
           ))}
         </View>
 
-        {/* ---- Our bottles ---- */}
-        {data.partnerId && (data.received.length > 0 || data.sent.length > 0) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Title variant="headingItalic">Our bottles</Title>
-              <Button title="Write one" variant="text" onPress={() => router.push("/bottle/write")} />
-            </View>
-            {data.received.length > 0 && (
-              <>
-                <Body variant="label" color={colors.inkSoft} style={styles.gapTop}>
-                  Received
-                </Body>
-                {data.received.map((b) => (
-                  <BottleRow
-                    key={b.id}
-                    bottle={b}
-                    title={b.kind === "open_when" ? `Open when ${b.open_when_label}` : firstLine(b.message)}
-                    status={
-                      b.kind === "open_when"
-                        ? b.opened_at
-                          ? `Opened ${formatLongDate(new Date(b.opened_at))}`
-                          : "In your jar"
-                        : b.opened_at
-                          ? `Arrived ${formatLongDate(new Date(b.unlock_at ?? b.created_at))}`
-                          : "Washed ashore — tap to open"
-                    }
-                    onPress={() => router.push({ pathname: "/bottle/[id]", params: { id: b.id } })}
-                  />
-                ))}
-              </>
-            )}
-            {data.sent.length > 0 && (
-              <>
-                <Body variant="label" color={colors.inkSoft} style={styles.gapTop}>
-                  Sent
-                </Body>
-                {data.sent.map((b) => (
-                  <BottleRow
-                    key={b.id}
-                    bottle={b}
-                    title={b.kind === "open_when" ? `Open when ${b.open_when_label}` : firstLine(b.message)}
-                    status={
-                      b.opened_at
-                        ? `Opened ❤️ ${formatLongDate(new Date(b.opened_at))}`
-                        : b.kind === "open_when"
-                          ? "Waiting in the jar"
-                          : b.unlock_at && new Date(b.unlock_at) > new Date()
-                            ? `Arrives ${formatLongDate(new Date(b.unlock_at))}`
-                            : "Washed ashore"
-                    }
-                    onPress={() =>
-                      b.opened_at ? router.push({ pathname: "/bottle/[id]", params: { id: b.id } }) : setSentMenu(b)
-                    }
-                  />
-                ))}
-              </>
-            )}
-          </View>
-        )}
+        {/* ---- Our years (one per anniversary reached) ---- */}
+        <OurYears coupleId={data.coupleId} myId={data.myId} start={data.start} partnerName={partner} refreshKey={refreshKey} />
 
         {/* ---- Birthday surprise (for my partner) ---- */}
         {data.partnerId && (
-          <View style={styles.section}>
-            <Title variant="headingItalic">A birthday surprise</Title>
+          <View>
+            <SectionHeading icon="gift" title="A birthday surprise" />
             {!partnerBirthday ? (
               <Body color={colors.inkSoft} style={styles.gapTop}>
                 Add {partner}'s birthday above to prepare a sealed surprise for their day.
@@ -401,6 +365,83 @@ export default function Us() {
             )}
           </View>
         )}
+        {/* ---- Our favorites ---- */}
+        <Favorites coupleId={data.coupleId} myId={data.myId} refreshKey={refreshKey} />
+
+        {/* ---- Little things ---- */}
+        <LittleThings
+          coupleId={data.coupleId}
+          myId={data.myId}
+          partnerId={data.partnerId}
+          me={profiles.me}
+          partner={profiles.partner}
+          partnerName={partner}
+          refreshKey={refreshKey}
+        />
+
+        {/* ---- Bucket list ---- */}
+        <BucketList coupleId={data.coupleId} myId={data.myId} refreshKey={refreshKey} />
+
+        {/* ---- Our bottles ---- */}
+        {data.partnerId && (data.received.length > 0 || data.sent.length > 0) && (
+          <View>
+            <SectionHeading icon="bottle" title="Our bottles" action="Write one" onAction={() => router.push("/bottle/write")} />
+            {data.received.length > 0 && (
+              <>
+                <Body variant="label" color={colors.inkSoft} style={styles.gapTop}>
+                  Received
+                </Body>
+                {data.received.map((b) => (
+                  <BottleRow
+                    key={b.id}
+                    bottle={b}
+                    title={b.kind === "open_when" ? `Open when ${b.open_when_label}` : firstLine(b.message)}
+                    status={
+                      b.kind === "open_when"
+                        ? b.opened_at
+                          ? `Opened ${formatLongDate(new Date(b.opened_at))}`
+                          : "In your jar"
+                        : b.opened_at
+                          ? `Arrived ${formatLongDate(new Date(b.unlock_at ?? b.created_at))}`
+                          : "Washed ashore — tap to open"
+                    }
+                    onPress={() => router.push({ pathname: "/bottle/[id]", params: { id: b.id } })}
+                  />
+                ))}
+              </>
+            )}
+            {data.sent.length > 0 && <NotifyPromptCard partnerName={partner} style={styles.gapTop} />}
+            {data.sent.length > 0 && (
+              <>
+                <Body variant="label" color={colors.inkSoft} style={styles.gapTop}>
+                  Sent
+                </Body>
+                {data.sent.map((b) => (
+                  <BottleRow
+                    key={b.id}
+                    bottle={b}
+                    title={b.kind === "open_when" ? `Open when ${b.open_when_label}` : firstLine(b.message)}
+                    status={
+                      b.opened_at
+                        ? `Opened ❤️ ${formatLongDate(new Date(b.opened_at))}`
+                        : b.kind === "open_when"
+                          ? "Waiting in the jar"
+                          : b.unlock_at && new Date(b.unlock_at) > new Date()
+                            ? `Arrives ${formatLongDate(new Date(b.unlock_at))}`
+                            : "Washed ashore"
+                    }
+                    onPress={() =>
+                      b.opened_at ? router.push({ pathname: "/bottle/[id]", params: { id: b.id } }) : setSentMenu(b)
+                    }
+                  />
+                ))}
+              </>
+            )}
+          </View>
+        )}
+
+        {/* ---- Our stats ---- */}
+        <StatsLedger coupleId={data.coupleId} myId={data.myId} start={data.start} myName={data.myName ?? "you"} partnerName={partner} refreshKey={refreshKey} />
       </ScrollView>
 
       <Sheet visible={noteOpen} onClose={() => (saving ? null : setNoteOpen(false))}>
@@ -501,6 +542,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: GUTTER },
   flex: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: space.lg },
+  pair: { flexDirection: "row" },
+  pairSecond: { marginLeft: -14 },
   prompt: { marginTop: space.xl, padding: space.xl, transform: [{ rotate: "0.6deg" }] },
   promptHint: { marginTop: space.xs, marginBottom: space.md },
   promptActions: { flexDirection: "row", justifyContent: "flex-end", gap: space.sm },

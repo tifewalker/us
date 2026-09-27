@@ -1,3 +1,4 @@
+export { Avatar } from "./Avatar";
 export { Button } from "./Button";
 export { DatePickerField, formatLongDate, toDateString } from "./DatePickerField";
 export { EmptyState } from "./EmptyState";

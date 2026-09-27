@@ -4,11 +4,13 @@ import { BottleThrow } from "@/components/moments/BottleMoments";
 import { SongCard } from "@/components/music/SongCard";
 import { SongPicker } from "@/components/music/SongPicker";
 import { usePreviewStopOnBlur } from "@/components/music/usePreviewStopOnBlur";
+import { VoiceNotesField } from "@/components/voice/VoiceNotesField";
 import { Body, Button, formatLongDate, Icon3D, Input, PressableScale, ScreenBackground, Title } from "@/components/ui";
 import { getCurrentUser, getUserName } from "@/lib/auth";
 import { arrivalDate, OPEN_WHEN_LABELS, saveBottle, type ArrivalChoice, type Bottle } from "@/lib/bottles";
 import { getMyCouple } from "@/lib/couples";
-import { addGiftMedia, getGift, setGiftMedia } from "@/lib/gifts";
+import { addGiftMedia, addGiftVoice, getGift, MAX_SEALED_VOICES, setGiftMedia } from "@/lib/gifts";
+import { MAX_VOICE_SECONDS } from "@/lib/voice";
 import { birthdayOf, getImportantDates } from "@/lib/importantDates";
 import type { MediaRef } from "@/lib/memories";
 import type { Song } from "@/lib/music";
@@ -101,6 +103,8 @@ export default function WriteBottle() {
     );
   }
 
+  const existingVisual = existing.filter((m) => m.media_type !== "voice").length;
+  const existingVoices = existing.length - existingVisual;
   const keepDate = editing?.kind === "bottle" && editing.unlock_at ? new Date(editing.unlock_at) : null;
   const choices: { value: ArrivalChoice | "keep"; label: string; hidden?: boolean }[] = [
     { value: "keep", label: keepDate ? `Keep ${formatLongDate(keepDate)}` : "Keep", hidden: !keepDate },
@@ -122,7 +126,7 @@ export default function WriteBottle() {
     if (!ctx) return;
     if (!message.trim()) return Alert.alert("Write something", "A bottle needs a message.");
     if (arrival === "openWhen" && !label) return Alert.alert("Open when…?", "Pick or write when they should open it.");
-    if (existing.length + media.assets.length > MAX_MEDIA) return Alert.alert("Too many", `Up to ${MAX_MEDIA} photos and videos.`);
+    if (existingVisual + media.assets.length > MAX_MEDIA) return Alert.alert("Too many", `Up to ${MAX_MEDIA} photos and videos.`);
     setSending(true);
     try {
       const isOpenWhen = arrival === "openWhen";
@@ -140,6 +144,8 @@ export default function WriteBottle() {
       const added: MediaRef[] = [];
       const failed = await media.uploadEach(async (asset, mediaType, onProgress) => {
         added.push(await addGiftMedia(saved, { uri: asset.uri, mediaType, durationMs: asset.duration, thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType }, onProgress));
+      }, async (voice, onProgress) => {
+        added.push(await addGiftVoice(saved, voice, onProgress));
       });
       if (added.length) await setGiftMedia(saved.id, [...existing, ...added]);
       media.clear();
@@ -183,18 +189,35 @@ export default function WriteBottle() {
           {song ? <SongCard song={song} onRemove={() => setSong(null)} style={styles.song} /> : <Button title="Add a song" icon="musicalNotes" variant="soft" onPress={() => setPickerOpen(true)} />}
 
           <Text style={[typeScale.label, styles.label]}>Photos and videos (optional, up to {MAX_MEDIA})</Text>
-          {existing.length > 0 && (
+          {existingVisual > 0 && (
             <Body variant="small" color={colors.inkSoft} style={styles.existing}>
-              {existing.length} already in the bottle
+              {existingVisual} already in the bottle
             </Body>
           )}
           <MediaTray
             assets={media.assets}
             preparing={media.preparing}
             progress={media.progress}
-            disabled={sending || existing.length + media.assets.length >= MAX_MEDIA}
+            disabled={sending || existingVisual + media.assets.length >= MAX_MEDIA}
             onPick={media.pick}
             onRemove={media.remove}
+          />
+
+          <Text style={[typeScale.label, styles.label]}>Voice notes (optional, up to {MAX_SEALED_VOICES}, 2 minutes each)</Text>
+          {existingVoices > 0 && (
+            <Body variant="small" color={colors.inkSoft} style={styles.existing}>
+              {existingVoices} already in the bottle
+            </Body>
+          )}
+          <VoiceNotesField
+            voices={media.voices}
+            onAdd={media.addVoice}
+            onRemove={media.removeVoice}
+            max={MAX_SEALED_VOICES}
+            existingCount={existingVoices}
+            maxSeconds={MAX_VOICE_SECONDS}
+            recorderLabel={`Say something to ${ctx.partnerName}`}
+            disabled={sending}
           />
 
           <Text style={[typeScale.label, styles.label]}>When should it arrive?</Text>

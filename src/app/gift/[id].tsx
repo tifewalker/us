@@ -2,6 +2,7 @@ import { Collage } from "@/components/memories/Collage";
 import { SimpleViewer } from "@/components/memories/SimpleViewer";
 import { SparkleBurst } from "@/components/moments/effects";
 import { SongCard } from "@/components/music/SongCard";
+import { VoiceTag } from "@/components/voice/VoiceTag";
 import { usePreviewStopOnBlur } from "@/components/music/usePreviewStopOnBlur";
 import {
     Body,
@@ -18,7 +19,7 @@ import {
     WashiTape,
 } from "@/components/ui";
 import { getCurrentUser, getUserName } from "@/lib/auth";
-import { getGift, markGiftOpened, signGiftMedia, type Gift } from "@/lib/gifts";
+import { getGift, markGiftOpened, resolveGiftMedia, type Gift } from "@/lib/gifts";
 import type { ResolvedMedia } from "@/lib/memories";
 import { colors, GUTTER, radius, shadows, space } from "@/theme";
 import { Image } from "expo-image";
@@ -80,24 +81,7 @@ export default function GiftScreen() {
         const recipient = g.recipient_id === user.id;
         setIsRecipient(recipient);
         getUserName(g.sender_id).then((n) => setFromName(n?.trim().split(/\s+/)[0] ?? null)).catch(() => {});
-        if (g.media?.length) {
-          const urls = await signGiftMedia(g.media);
-          setItems(
-            g.media
-              .filter((m) => urls[m.storage_path])
-              .map((m) => ({
-                id: m.storage_path,
-                type: m.media_type,
-                url: urls[m.storage_path],
-                thumbUrl: m.media_type === "photo" ? urls[m.storage_path] : m.thumbnail_path ? (urls[m.thumbnail_path] ?? null) : null,
-                cacheKey: m.storage_path,
-                thumbCacheKey: m.media_type === "photo" ? m.storage_path : m.thumbnail_path,
-                storagePath: m.storage_path,
-                thumbnailPath: m.thumbnail_path,
-                durationSeconds: m.duration_seconds,
-              })),
-          );
-        }
+        setItems(await resolveGiftMedia(g.media ?? []));
         if (recipient && !g.opened_at) {
           setUnwrapping(true);
           markGiftOpened(g.id).catch((e) => console.log("[Gift] markOpened failed:", e.message));
@@ -127,6 +111,11 @@ export default function GiftScreen() {
       </ScreenBackground>
     );
   }
+
+  // photos/videos in the collage (+ viewer, same indexes); voice notes as tags,
+  // shown (and playable) only after the unwrap moment
+  const visual = items.filter((m) => m.type !== "voice");
+  const voices = unwrapping ? [] : items.filter((m) => m.type === "voice");
 
   return (
     <ScreenBackground padded={false}>
@@ -161,9 +150,25 @@ export default function GiftScreen() {
 
           {gift.song && <SongCard song={gift.song} style={styles.song} />}
 
-          {items.length > 0 && (
+          {voices.length > 0 && (
+            <View style={styles.voices}>
+              {voices.map((v, i) => (
+                <VoiceTag
+                  key={v.id}
+                  id={v.id}
+                  playKey={v.storagePath}
+                  uri={v.url}
+                  durationSeconds={v.durationSeconds ?? 0}
+                  waveform={v.waveform ?? []}
+                  label={`voice note ${voices.length > 1 ? i + 1 : ""}`.trim()}
+                  style={[styles.voiceTag, i % 2 === 1 && styles.voiceTagRight]}
+                />
+              ))}
+            </View>
+          )}
+          {visual.length > 0 && (
             <View style={styles.collage}>
-              <Collage items={items} width={width - GUTTER * 2} focused={focused && !unwrapping && viewer === null} onOpen={setViewer} onLongPress={() => {}} onMore={() => setViewer(5)} />
+              <Collage items={visual} width={width - GUTTER * 2} focused={focused && !unwrapping && viewer === null} onOpen={setViewer} onLongPress={() => {}} onMore={() => setViewer(5)} />
             </View>
           )}
         </Animated.View>
@@ -172,7 +177,7 @@ export default function GiftScreen() {
       {unwrapping && <Unwrap onDone={() => setUnwrapping(false)} />}
 
       <Modal visible={viewer !== null} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setViewer(null)}>
-        {viewer !== null && <SimpleViewer items={items} start={viewer} onClose={() => setViewer(null)} />}
+        {viewer !== null && <SimpleViewer items={visual} start={viewer} onClose={() => setViewer(null)} />}
       </Modal>
     </ScreenBackground>
   );
@@ -263,6 +268,9 @@ function Unwrap({ onDone }: { onDone: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  voices: { marginTop: space.xl, gap: space.lg },
+  voiceTag: { width: "88%" },
+  voiceTagRight: { alignSelf: "flex-end" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   centerFill: { flex: 1, alignItems: "center", justifyContent: "center" },
   abs: { position: "absolute" },

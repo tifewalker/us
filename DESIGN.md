@@ -437,6 +437,123 @@ Each of you has **your own** note (`welcome_notes`, one per person), so writing 
   - **"Force a Remember when today (this phone)"** picks on that phone only and saves nothing.
   - **"Pick today's Remember when for real (shared)"** saves today's pick for the couple, so the other phone shows the same one. If today already has a pick, it keeps that one.
 
+## Play
+
+**The Play tab** is a striped beach towel seen from above, tilted slightly, with the games lying on it as objects (each a `PressableScale` with a haptic, not a box). Each object has one Caveat status line under it:
+
+| Object | Game | Status line |
+|---|---|---|
+| A fanned deck of cards | Questions | "{Name} asked you something 👀" / "Ask {Name} something" |
+| A sealed envelope with a coral wax seal | Secret missions | "Draw today's mission" / "On a mission 🤫" / "Mission done ✅" / "Missions revealed 💌" |
+| A small wooden wheel | Roulette | "Spin something fun" |
+| A folded note | Today's moment | The activity's current status |
+
+- **The tab-bar dot:** a small coral dot on the Play icon when something is waiting for you: an unanswered question your partner asked, today's activity still unanswered by you, or a revealed partner mission you haven't looked at.
+
+**Couple questions** (`play/questions`):
+- Category chips (Know you · Deep · Future · Would you rather · Fun, plus Spicy 🌶️ when it's on), then a paper card deck. The question is in Fraunces, with an "ours" mark on your own cards.
+- **Swipe left to skip, right to "Ask {Name}".** There are buttons too, for the web. Skipping records nothing. Asking opens the thread for you to answer first.
+- **Lists:** "Waiting for you", "Waiting for {Name}", and **Our answers** (revealed threads by category, newest first).
+- **Thread:** answer in a Caveat field; the database keeps their answer hidden until yours exists. The first reveal is the envelope moment (it opens live if you're waiting), then static notes, with "Same brain again 😂❤️" when your answers match.
+
+**Secret missions** (`play/missions`):
+- **Drawing:** three face-down, wax-sealed cards fanned out. Tap one and it flips (600ms, none with Reduce Motion) to show your mission, with a category tag and a duration tag. You get one "Draw again" per day.
+- **Doing it:** "Done ✅" with an optional "What I did" note in Caveat. "{Name} is on a secret mission 🤫" shows with no content.
+- **Reveal:** once you've both finished, or the next day, the two missions appear side by side as open letters, with what each of you did. Under your partner's: "Did you notice?" → "I noticed 😏" / "I had no idea 😂". Their answer about yours shows once they've picked. Past missions are listed below.
+
+**Roulette** (`play/roulette`):
+- **Spinning:** mood chips (Easy · Romantic · Funny · Chaotic · Hard, plus Spicy). Each slice shows the mood's emoji (🌊 💕 😂 🌀 🔥 🌶️), never a number. An 8-segment SVG wheel spins 5 turns plus the offset over 3.8s, easing out, with a haptic tick for each segment that passes (native only). It lands on a challenge card.
+- **After it lands:** "We did it ✅" and "Spin again". Recent spins read "{Name} spun · done ✅/not yet".
+- **Reduce Motion:** no spin, just the card.
+
+**Spicy mode 🌶️** (a toggle on the Play tab):
+- **On only when both of you turn it on.** The line under the toggle reads:
+  - "Turn on (your partner has to turn it on too)" before either of you has
+  - "Waiting for {Name} to turn it on" once you have
+  - "{Name} turned on spicy mode 🌶️" once they have and you haven't (**no notification or pressure message is ever sent**)
+  - "Spicy mode is on" once you both have
+
+  Either of you turning it off switches it off for both.
+- **Tone:** sensual, flirty, teasing and tasteful: words, voice notes, massages, kisses, honest conversations, date nights. Never explicit, never photo requests.
+- **Discretion:**
+  - spicy never appears on the beach
+  - summaries show **"Something spicy 🌶️"** until opened
+  - every spicy card has a Skip that records nothing
+  - future notifications must stay neutral
+
+**Your own cards:** every game has "Add your own card" (text, a category, and a duration for missions). Spicy is offered only while spicy mode is on. Your cards are private to the two of you and show an "ours" mark.
+
+## Voice notes
+
+**Recording** (`VoiceRecorder`): a warmWhite paper note (radius 6, paper shadow) with a Caveat label ("Say it to {Name}", "Say it instead", "Say something to {Name}"…).
+- **Idle:** a round ocean mic button (56px, white mic glyph) with "Tap to record · up to 1 minute / 2 minutes" in Nunito.
+- **Recording:** the button turns sunset with a stop square; 32 live level bars in sunset fill the rest of the row; under it a sunset dot and the timer "0:12 / 1:00". Tap again to stop; it stops itself at the limit (60s for activities, questions and perspectives; 2 min for memories, bottles and gifts).
+- **Preview:** "Have a listen", the player, then "Record again" (soft) and "Use this" (primary).
+- **Mic permission:** native shows a short, warm explanation first ("…only the two of you ever hear it") with "Allow microphone" / "Not now". If it's off, the note explains exactly where to turn it on. Web browsers that can't record mp4 say "Voice notes aren't supported in this browser — try Safari or the app".
+
+**Playing** (`VoicePlayer`): a round play/pause button (ocean on paper, warmWhite on dark), 48 rounded waveform bars that fill with the button's colour as it plays (unplayed = paperEdge), and the duration (position / total while playing). Tap or drag on the waveform to seek. Only one sound plays in the whole app at a time.
+
+**Where it shows:**
+- **Answers** (today's moment, questions, Two perspectives): the player sits inside that person's paper note, under their words if they wrote any. In the envelope reveal, a voice answer's card shows "🎙️ a voice note" (or the words) over a small static waveform; it's played on the notes that follow.
+- **Memories:** never a polaroid. Each voice note is a **paper tag** (warmWhite, seeded tilt ±2°, a sky washi strip on top, Caveat "a voice note") below the collage, alternating left/right at 88% width. Long-press → remove.
+- **The reel:** a voice note is its own frame: the first photo blurred behind a scrim, and a big paper card (tilted −1.5°) with "a voice note" in Caveat, a 72px-tall waveform filling as it plays, and the time. The soundtrack ducks while it plays.
+- **Bottles and gifts:** up to 3 voice notes as paper tags after the letter, shown only once the unroll / unwrap moment has finished.
+
+## Us tab (scrapbook pages)
+
+The tab reads as one scrapbook, each section a different object, flowing into the next. Every section starts with a **SectionHeading**: a 30px 3D icon, the title in Fraunces SemiBold Italic, an optional text action ("Add"), and a hand-drawn wavy underline in paperEdge (no boxes, no caps).
+
+Order: **Our beginning → How we met → Our dates (+ A birthday surprise) → Our favorites → Little things → Bucket list → Our bottles → Our stats.**
+
+- **Our beginning:** the existing paper card, now with both avatars overlapping (48px, −14px overlap) instead of the beach icon.
+- **How we met:** a paper page (tilted 0.5°). With a photo, it's a polaroid taped at the top (sky tape) that overlaps the page edge. Title "How we met" in Fraunces, the story in Nunito bodyLarge (12 lines, then the editor), and "Last edited by {Name}" in inkFaint. Empty: a Caveat invitation. The editor autosaves (no Save button) and shows "Saving…" / "Last edited by you" / "Couldn't save — check your connection" (danger).
+- **Our favorites:** the song is a SongCard (vinyl) with its label above. Everything else is a **paper scrap**: a small rectangle in a rotating tint (warmWhite, tapeSky, tapeMint, sand, tapeCoral), a seeded ±3° tilt and a lifted shadow, with the label in Nunito small and the value in Caveat. Missing suggestions show as dashed outlines ("+ our place"). The sheet has suggestion chips (Our song / place / food / film / show / dessert / Something else).
+- **Little things:** two notebook pages (warmWhite with a coral margin line on the left; theirs on `paper`), side by side at ≥400px width, otherwise stacked, tilted −0.8° / +0.8°. Each has an avatar and a title ("About me" / "About {Name}"), then ruled lines with the label in Nunito small and the answer in Caveat. Only your page has dashed "+ favorite flower" prompts and "+ your own". Theirs is read-only.
+- **Bucket list:** one lined warmWhite checklist page. Open items: an ocean-outlined checkbox, the emoji, the title, and an optional "by {date}". Ticking plays a SparkleBurst on the box with a success haptic, then offers "Turn this into a memory?". **We did it** (Fraunces italic in coral, a key moment) lists done items struck through in inkSoft with an ocean hand-drawn tick, the date, and "📷 in our story" once linked.
+- **Our stats:** a ruled ledger page (sky rules, mint tape). The days together is the one `display` number, then one line per stat: **tally marks** (four uprights in ink, a coral strike per five) for 1–20, Caveat numerals above 20, and the label in Nunito small. Never a grid of number cards.
+
+## Settings
+
+- **Profile:** your avatar (64px, tap → "Choose a new photo" / "Remove photo"), your name in Caveat with "Edit name" (a sheet), your email. Below it is your person's avatar and name.
+- **Delete our world:** a small danger-colored text link at the very bottom, never a big button. Step 1 is a sheet listing exactly what goes, with a filled danger pill "I understand — continue" and "Keep everything". Step 2 is a sheet asking you to type "delete our world"; the danger pill "Delete our world" stays at 40% opacity until the phrase matches.
+
+## Anniversary (March 29)
+
+- **Palette:** `anniversarySky` = `#3A1E52` → `#D9507A` → `#FF9E6D`. Deeper violet and coral than golden hour, and it stays all day. The sun is big (r 34, soft halo) and rests low on the horizon at the right. Lanterns are warm amber paper (`#FFB86B`, glow `#FFD9A0`, frame `#C0613A`).
+- **The beach that day:**
+  - 9 paper lanterns rise slowly from the shoreline and shrink and fade toward the top of the sky (6 on web; still in the sky with Reduce Motion).
+  - "{N} years of us" is written in the sand in Caveat 30, a darker sand tone (`#D9AE6E`) with a faint light edge below-right, tilted −4°, as if drawn with a finger.
+  - The sign reads "Happy anniversary 🌅" and the greeting reads "Another year of us 🌅".
+- **Year stones:** small warm-grey pebbles (`#CFC2B0`, shadow `#A89A87`), each engraved with its number in Nunito bold ink and given a seeded tilt of up to ±8°. They sit in a row under the sign, one per anniversary reached, and stay forever. The same stone is the icon for "Year N" in Us → Our years, on the recap title and on the closing page.
+- **The moment:** a dark screen, then the sunset gradient fades in, then "29 March" (Caveat 34), "Another year of us." (Fraunces italic 36), "{N} years · {days} days together" (Nunito on onDarkSoft), then "Look back at our year" (primary, film icon) and "Later".
+- **"Our year" recap:** scrapbook pages on paper, with dark full-bleed pages only for the title, the highlights and the closing.
+  - Ink progress bars on paper pages, light bars on dark ones; ✕ at the top right.
+  - Tallies sit on a ruled warmWhite ledger (sky rules), and the numbers count up.
+  - Polaroids for first/latest and the busiest month (an overlapping collage).
+  - An album-cover grid with "{artist} kept coming back" in Caveat.
+  - Same brain is a big coral number with paired paper slips.
+  - "We did it" is a checklist page with ocean ticks.
+  - Highlights: a full-bleed photo with a slow zoom, a dark shade at the bottom, the title in Fraunces italic and the date in Caveat sand.
+  - Closing: "Here's to year {N+1} 🌅" on the sunset.
+- **Us → Our years:** one warmWhite paper page per year, alternating ±0.6°. Each has a stone, "Year N" (Fraunces italic 22), the date, "Watch our year" (soft, film icon) and a status line: coral once you've both answered, ocean otherwise, and it's tappable.
+
+## Notifications
+
+- **Settings → Notifications** (heading with the bottle icon):
+  - Status line in Nunito:
+    - "Notifications are on ✓" (ocean), with "Send me a test" (soft) and "Turn off here" (text).
+    - "Turn on notifications" (primary, bottle icon).
+    - Blocked: tells you exactly where to allow it.
+    - Not installed: "Add Us to your home screen first…".
+  - Five switch rows (label in Nunito bold, one-line hint in small inkSoft, ocean track): From {Name} · Bottles & gifts · Dates & reminders · Remember when · Gentle nudges.
+  - Quiet hours as two pill chips ("from 23:00", "to 08:00"). Each opens a sheet with a 24-hour grid and :00/:15/:30/:45.
+- **The one-time card** (`NotifyPromptCard`): a warmWhite paper note with mint tape, tilted 0.8°. "Want to know when {Name} replies?" in Caveat, a reassuring line ("never what they wrote"), then "Not now" and "Yes, tell me". It shows on the today screen while you're waiting, and in Our bottles once you've sent one — only in the installed web app, and only until answered.
+- **Copy voice for notifications:** short, warm, first names, one emoji at most, and no guilt, streaks or task lists. Never private content. Anything spicy reads "Something's waiting for you 😏".
+
+## Avatars
+
+`Avatar` (ui): a round photo inside a warmWhite ring (ring ≈ size/18) with a lifted shadow. With no photo, it shows the first letter in Fraunces italic on sand. Sizes: 64 (Settings), 48 (Our beginning), 32 (Little things pages), 30 (the stamp on reveal envelopes, pinned to the envelope's bottom-right corner).
+
 ## Components (`src/components/ui/`)
 
 Use these before writing a one-off:

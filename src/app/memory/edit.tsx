@@ -1,6 +1,8 @@
 import { MemoryFields, type MemoryFieldValues } from "@/components/memories/MemoryFields";
 import { Body, Button, ScreenBackground, Title, toDateString } from "@/components/ui";
-import { getMemoryById, updateMemory } from "@/lib/memories";
+import { VoiceNotesField } from "@/components/voice/VoiceNotesField";
+import { addMemoryVoice, getMemoryById, updateMemory } from "@/lib/memories";
+import { MAX_VOICE_SECONDS, type LocalVoice } from "@/lib/voice";
 import { colors, GUTTER, space } from "@/theme";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
@@ -12,6 +14,8 @@ export default function EditMemory() {
   const insets = useSafeAreaInsets();
   const [fields, setFields] = useState<MemoryFieldValues | null>(null);
   const [saving, setSaving] = useState(false);
+  const [coupleId, setCoupleId] = useState<string | null>(null);
+  const [voices, setVoices] = useState<LocalVoice[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -22,6 +26,7 @@ export default function EditMemory() {
           const [y, mo, d] = m.memory_date.split("-").map(Number);
           date = new Date(y, mo - 1, d);
         }
+        setCoupleId(m.couple_id);
         setFields({ title: m.title ?? "", description: m.description ?? "", location: m.location ?? "", date, song: m.song ?? null });
       })
       .catch((err) => {
@@ -45,6 +50,15 @@ export default function EditMemory() {
         memoryDate: fields.date ? toDateString(fields.date) : null,
         song: fields.song ?? null,
       });
+      const failed: string[] = [];
+      for (const [i, voice] of voices.entries()) {
+        try {
+          if (coupleId) await addMemoryVoice({ coupleId, memoryId: id, voice });
+        } catch (err: any) {
+          failed.push(`Voice note ${i + 1}: ${err.message ?? String(err)}`);
+        }
+      }
+      if (failed.length) Alert.alert("Saved, but some voice notes didn't upload", failed.join("\n"));
       router.back();
     } catch (err: any) {
       Alert.alert("Couldn't save", err.message ?? String(err));
@@ -71,6 +85,15 @@ export default function EditMemory() {
           {fields ? (
             <>
               <MemoryFields value={fields} onChange={setFields} withDate />
+              <VoiceNotesField
+                voices={voices}
+                onAdd={(v) => setVoices((p) => [...p, v])}
+                onRemove={(uri) => setVoices((p) => p.filter((v) => v.uri !== uri))}
+                max={5}
+                maxSeconds={MAX_VOICE_SECONDS}
+                disabled={saving}
+                style={styles.voice}
+              />
               <Button title="Save changes" onPress={handleSave} loading={saving} style={styles.save} />
               <Button title="Cancel" variant="text" onPress={() => router.back()} disabled={saving} />
             </>
@@ -89,6 +112,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { paddingHorizontal: GUTTER },
   lead: { marginTop: space.xs },
+  voice: { marginTop: space.xl },
   save: { marginTop: space.xl },
   loading: { marginTop: space.xxxl, alignItems: "center" },
 });

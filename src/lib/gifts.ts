@@ -1,5 +1,6 @@
-import { signPaths, uploadMediaFile, type MediaRef, type MediaType } from "./memories";
+import { signPaths, uploadMediaFile, type MediaRef, type MediaType, type ResolvedMedia } from "./memories";
 import type { Song } from "./music";
+import { asWaveform, uploadVoice, type LocalVoice } from "./voice";
 import { supabase } from "./supabase";
 
 // Sealed gifts = rows in `bottles` (014) with kind 'birthday'. RLS: the sender
@@ -131,6 +132,21 @@ export async function addGiftMedia(
   return ref;
 }
 
+// Up to MAX_SEALED_VOICES voice notes (2 min each) per bottle / gift. They
+// live in the same sealed folder, so the 014 sealing rules cover them.
+export const MAX_SEALED_VOICES = 3;
+
+export async function addGiftVoice(gift: Gift, voice: LocalVoice, onProgress?: (f: number) => void): Promise<MediaRef> {
+  const note = await uploadVoice(`${gift.couple_id}/sealed/${gift.id}`, voice, onProgress);
+  return {
+    storage_path: note.storage_path,
+    thumbnail_path: null,
+    media_type: "voice",
+    duration_seconds: note.duration_seconds,
+    waveform: note.waveform,
+  };
+}
+
 export async function setGiftMedia(giftId: string, media: MediaRef[]) {
   const { error } = await supabase.from("bottles").update({ media }).eq("id", giftId);
   if (error) throw error;
@@ -154,6 +170,27 @@ export async function markGiftOpened(id: string) {
 // Signed URLs for a gift's media (works only once readable — sender, or unlocked).
 export async function signGiftMedia(media: MediaRef[]) {
   return signPaths(media.flatMap((m) => [m.storage_path, m.thumbnail_path ?? ""]), 3600);
+}
+
+// Signs a bottle's / gift's media and shapes it like memory media (the
+// Collage takes photos/videos; voice notes become VoiceTags).
+export async function resolveGiftMedia(media: MediaRef[]): Promise<ResolvedMedia[]> {
+  if (!media?.length) return [];
+  const urls = await signGiftMedia(media);
+  return media
+    .filter((m) => urls[m.storage_path])
+    .map((m) => ({
+      id: m.storage_path,
+      type: m.media_type,
+      url: urls[m.storage_path],
+      thumbUrl: m.media_type === "photo" ? urls[m.storage_path] : m.thumbnail_path ? (urls[m.thumbnail_path] ?? null) : null,
+      cacheKey: m.storage_path,
+      thumbCacheKey: m.media_type === "photo" ? m.storage_path : m.thumbnail_path,
+      storagePath: m.storage_path,
+      thumbnailPath: m.thumbnail_path,
+      durationSeconds: m.duration_seconds,
+      waveform: m.media_type === "voice" ? asWaveform(m.waveform) : null,
+    }));
 }
 
 // Local midnight at the start of the next occurrence of a birthday.

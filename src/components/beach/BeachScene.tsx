@@ -1,5 +1,7 @@
 import { Beginning } from "@/components/moments/Beginning";
+import { AnniversaryMoment } from "@/components/moments/AnniversaryMoment";
 import { BirthdayMoment } from "@/components/moments/BirthdayMoment";
+import { dayMonthLabel, hasSeenAnniversary, markAnniversarySeen, yearsLabel } from "@/lib/anniversary";
 import { RememberCard, type RememberMemory } from "@/components/moments/RememberCard";
 import { getSignedMediaUrl } from "@/lib/memories";
 import { getTodaysRemember } from "@/lib/remember";
@@ -17,6 +19,7 @@ import { router, useIsFocused } from "expo-router";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AppState, Modal, Platform, StyleSheet, View } from "react-native";
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
+import { ANNIVERSARY_SUNSET, Lanterns, SandWriting, YearStones } from "./Anniversary";
 import { Balloons, Bunting, CakeSticker, GiftSticker, Petals } from "./Birthday";
 import { JarSticker, NewMemoryTag, RememberPolaroid, SeaBottles, WashedBottle, WriteBottleSticker } from "./OceanObjects";
 import { ChapterUnlock } from "./ChapterUnlock";
@@ -95,7 +98,7 @@ export function BeachScene() {
   }, [focused]);
 
   // ---- dev overrides (__DEV__ only) ----
-  const [dev, setDev] = useState<DevOverrides>({ time: "auto", chapter: "auto", birthday: "auto", everything: false });
+  const [dev, setDev] = useState<DevOverrides>({ time: "auto", chapter: "auto", birthday: "auto", everything: false, anniversary: false, extraStones: 0 });
   const [devOpen, setDevOpen] = useState(false);
   // __DEV__ "Show every object": every conditional object on at once, with
   // stand-in data where there's none — for layout reviews (never in production).
@@ -117,8 +120,19 @@ export function BeachScene() {
   })();
   const myBirthday = !!birthday && !!data && birthday.personId === data.userId;
 
-  // A soft golden sky all day on a birthday (unless the dev panel forces a time).
-  const hour = dev.time !== "auto" ? OVERRIDE_HOURS[dev.time] : birthday ? 17.4 : now;
+  // ---- anniversary mode (relationship_start's month/day; dev can force it) ----
+  const anniv = !data
+    ? null
+    : __DEV__ && dev.anniversary
+      ? { isToday: true, year: Math.max(1, data.anniversary.reached), reached: Math.max(1, data.anniversary.reached) }
+      : data.anniversary;
+  const annivToday = !!anniv?.isToday && !!anniv.year;
+  const stoneCount = (data?.yearStones ?? 0) + (__DEV__ ? dev.extraStones : 0);
+
+  // A soft golden sky all day on a birthday, the anniversary sunset on the
+  // anniversary (unless the dev panel forces a time).
+  const hour = dev.time !== "auto" ? OVERRIDE_HOURS[dev.time] : annivToday ? 18 : birthday ? 17.4 : now;
+  const sunset = annivToday && dev.time === "auto" ? ANNIVERSARY_SUNSET : undefined;
   const night = nightFactor(hour);
   const tod = timeName(hour);
   const chapter: ChapterNumber = showAll ? 4 : dev.chapter === "auto" ? (data?.chapter ?? 1) : dev.chapter;
@@ -166,6 +180,21 @@ export function BeachScene() {
     setBdayMoment("done");
   }, [data]);
 
+  // ---- anniversary moment: first open on the anniversary (per person, per year) ----
+  const [annivMoment, setAnnivMoment] = useState<"checking" | "show" | "done">("checking");
+  useEffect(() => {
+    if (!data || beginning !== "done" || bdayMoment !== "done" || annivMoment !== "checking") return;
+    if (!annivToday || !anniv?.year) {
+      setAnnivMoment("done");
+      return;
+    }
+    hasSeenAnniversary(data.userId, anniv.year).then((seen) => setAnnivMoment(seen ? "done" : "show"));
+  }, [data, beginning, bdayMoment, annivMoment, annivToday, anniv?.year]);
+  const finishAnniversary = useCallback(() => {
+    if (data && anniv?.year && !(__DEV__ && dev.anniversary)) markAnniversarySeen(data.userId, anniv.year);
+    setAnnivMoment("done");
+  }, [data, anniv?.year, dev.anniversary]);
+
   // __DEV__: replay the polaroid-develop moment with the latest memory
   const [developReplay, setDevelopReplay] = useState(false);
 
@@ -199,8 +228,8 @@ export function BeachScene() {
   }, [data, forceRemember, shareRemember]);
 
   useEffect(() => {
-    // One moment at a time: the chapter unlock waits for the intro and the birthday moment.
-    if (!data || dev.chapter !== "auto" || beginning !== "done" || bdayMoment !== "done") return;
+    // One moment at a time: the chapter unlock waits for the intro, the birthday and the anniversary moments.
+    if (!data || dev.chapter !== "auto" || beginning !== "done" || bdayMoment !== "done" || annivMoment !== "done") return;
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(seenKey(data.userId));
@@ -218,7 +247,7 @@ export function BeachScene() {
         console.log("[Beach] seen-chapter storage failed:", e.message);
       }
     })();
-  }, [data?.userId, data?.chapter, dev.chapter, celebrate, beginning, bdayMoment]);
+  }, [data?.userId, data?.chapter, dev.chapter, celebrate, beginning, bdayMoment, annivMoment]);
 
   const { W, shoreY, band, palmHeight, polaroidWidth } = layout;
   const onSky = night > 0.5 ? colors.onDark : colors.inkOcean;
@@ -230,13 +259,23 @@ export function BeachScene() {
   return (
     <View style={styles.root}>
       {/* ---- scenery (not tappable) ---- */}
-      <Sky layout={layout} hour={hour} active={active && !webLite} />
+      <Sky layout={layout} hour={hour} active={active && !webLite} sunset={sunset} />
       <Clouds layout={layout} active={active} dim={night} />
       <Sea layout={layout} active={active} dim={night} lite={webLite} />
       <Sand layout={layout} dim={night} />
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <PaperTexture opacity={0.35} />
       </View>
+
+      {/* ---- anniversary: lanterns rising over the sea, words in the sand ---- */}
+      {annivToday && (
+        <Lanterns W={W} horizonY={layout.horizonY} shoreY={shoreY} topY={layout.insets.top + 40} active={active} />
+      )}
+      {annivToday && anniv?.year && (
+        <SandWriting text={yearsLabel(anniv.year)} x={W * 0.3} y={shoreY + band * 0.58} maxWidth={W * 0.44} />
+      )}
+      {/* one engraved stone per anniversary reached — every day after, too */}
+      <YearStones count={stoneCount} left={W * 0.64} top={layout.groundBottom - 88} maxWidth={W * 0.34} />
 
       {items.has("hut") && (
         <Pop item="hut" popChapter={popChapter} popKey={popKey} sparkleAt={{ x: layout.hut.x, y: layout.hut.y - 50 }}>
@@ -300,7 +339,7 @@ export function BeachScene() {
             baseY={layout.sign.y}
             width={Math.min(W * 0.4, 176)}
             daysOfUs={daysOfUs(data.relationshipStart)}
-            countdown={data.signCountdown}
+            countdown={annivToday ? "Happy anniversary 🌅" : data.signCountdown}
             onPress={() => router.navigate("/us")}
             onLongPress={__DEV__ ? () => setDevOpen(true) : undefined}
           />
@@ -404,7 +443,9 @@ export function BeachScene() {
       {/* ---- quiet greeting ---- */}
       <View style={[styles.greeting, { top: layout.insets.top + space.sm }]} pointerEvents="none">
         <Title variant="headingItalic" color={onSky} center style={styles.greetingText}>
-          {birthday
+          {annivToday
+            ? "Another year of us 🌅"
+            : birthday
             ? myBirthday
               ? `Happy birthday, ${birthday.name} 🎂`
               : `It's ${birthday.name}'s birthday — make it special`
@@ -451,6 +492,22 @@ export function BeachScene() {
               finishBirthday();
               const id = data.unlockedGiftId;
               if (id) setTimeout(() => router.push({ pathname: "/gift/[id]", params: { id } }), 350);
+            }}
+          />
+        )}
+      </Modal>
+
+      <Modal visible={!!data && annivMoment === "show"} transparent animationType="fade" statusBarTranslucent onRequestClose={finishAnniversary}>
+        {data && annivMoment === "show" && anniv?.year && (
+          <AnniversaryMoment
+            dateLabel={dayMonthLabel(data.relationshipStart)}
+            years={anniv.year}
+            days={daysOfUs(data.relationshipStart)}
+            onDone={finishAnniversary}
+            onWatch={() => {
+              const year = anniv.year;
+              finishAnniversary();
+              setTimeout(() => router.push({ pathname: "/anniversary/[year]", params: { year: String(year) } }), 350);
             }}
           />
         )}
@@ -534,6 +591,16 @@ export function BeachScene() {
             } catch (e: any) {
               Alert.alert("Couldn't seal it", e.message ?? String(e));
             }
+          }}
+          onForceAnniversary={() => {
+            setDevOpen(false);
+            const on = !dev.anniversary;
+            setDev({ ...dev, anniversary: on });
+            if (on) setTimeout(() => setAnnivMoment("show"), 400);
+          }}
+          onPreviewRecap={() => {
+            setDevOpen(false);
+            setTimeout(() => router.push({ pathname: "/anniversary/[year]", params: { year: "preview" } }), 350);
           }}
           onClose={() => setDevOpen(false)}
         />

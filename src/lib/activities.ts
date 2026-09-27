@@ -1,3 +1,4 @@
+import type { VoiceNote } from './voice';
 import * as ImageManipulator from 'expo-image-manipulator';
 import type { Song } from './music';
 import { localDateString } from './dates';
@@ -64,8 +65,12 @@ export async function uploadActivityResponseMedia(params: {
     { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
   );
 
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user) throw new Error('Not signed in');
+  // <couple>/activity-responses/<daily_activity>/<my user id>/<file> — storage
+  // RLS (017) lets only me read it until my partner has answered too.
   const fileName = `${Date.now()}-${Math.floor(Math.random() * 10000)}.jpg`;
-  const storagePath = `${params.coupleId}/activity-responses/${params.dailyActivityId}/${fileName}`;
+  const storagePath = `${params.coupleId}/activity-responses/${params.dailyActivityId}/${authData.user.id}/${fileName}`;
 
   return uploadLocalFile({ localUri: manipulated.uri, path: storagePath });
 }
@@ -74,7 +79,8 @@ export async function submitActivityResponse(
   dailyActivityId: string,
   response: string,
   mediaPath?: string,
-  song?: Song | null
+  song?: Song | null,
+  voice?: VoiceNote | null
 ) {
   const { data: authData } = await supabase.auth.getUser();
   if (!authData.user) throw new Error('Not signed in');
@@ -83,6 +89,7 @@ export async function submitActivityResponse(
     response,
     media_url: mediaPath ?? null,
     song: song ?? null,
+    voice: voice ?? null,
     completed_at: new Date().toISOString(),
   };
 

@@ -1,6 +1,7 @@
 import { Body, Button, PressableScale, Title } from "@/components/ui";
 import { colors, radius, shadows, space, type as typeScale } from "@/theme";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { DEV_NOTIFICATION_KINDS, sendTestNotification } from "@/lib/push";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { ChapterNumber } from "./chapters";
 import type { TimeOverride } from "./time";
 
@@ -9,6 +10,8 @@ export type DevOverrides = {
   chapter: "auto" | ChapterNumber;
   birthday: "auto" | "me" | "partner" | "off"; // birthday mode visuals only
   everything: boolean; // "Show every object" — all conditional objects at once (layout review)
+  anniversary: boolean; // "Force anniversary mode" (visuals + the moment)
+  extraStones: number; // "Add a year stone" — visual only, never saved
 };
 const BIRTHDAY_OPTIONS: { value: DevOverrides["birthday"]; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -39,6 +42,8 @@ export function DevPanel({
   onSealTestGift,
   onForceRemember,
   onShareRemember,
+  onForceAnniversary,
+  onPreviewRecap,
   onClose,
 }: {
   visible: boolean;
@@ -51,6 +56,8 @@ export function DevPanel({
   onSealTestGift: () => void; // a birthday gift to my partner that unlocks in 1 minute
   onForceRemember: () => void; // show a "Remember when…" today even if it isn't a remember day (phone-only)
   onShareRemember: () => void; // real pick-and-save for today (shared with the other phone)
+  onForceAnniversary: () => void; // anniversary visuals + replay the moment
+  onPreviewRecap: () => void; // "Our year" for the last 12 months, today's data
   onClose: () => void;
 }) {
   if (!__DEV__) return null;
@@ -108,6 +115,29 @@ export function DevPanel({
             <Chip label="Force a Remember when today (this phone)" selected={false} onPress={onForceRemember} />
             <Chip label="Pick today's Remember when for real (shared)" selected={false} onPress={onShareRemember} />
           </View>
+
+          <Text style={[typeScale.label, styles.section]}>Anniversary</Text>
+          <View style={styles.row}>
+            <Chip label="Force anniversary mode" selected={value.anniversary} onPress={onForceAnniversary} />
+            <Chip label="Preview recap (last 12 months)" selected={false} onPress={onPreviewRecap} />
+            <Chip label={`Add a year stone (visual)${value.extraStones ? ` +${value.extraStones}` : ""}`} selected={value.extraStones > 0} onPress={() => onChange({ ...value, extraStones: value.extraStones + 1 })} />
+          </View>
+
+          <Text style={[typeScale.label, styles.section]}>Notify me now (web app, this account only)</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+            {DEV_NOTIFICATION_KINDS.map((kind) => (
+              <Chip
+                key={kind}
+                label={kind.replace(/_/g, " ")}
+                selected={false}
+                onPress={() =>
+                  sendTestNotification(kind)
+                    .then((n) => n === 0 && Alert.alert("No device", "Turn notifications on in Settings (installed web app) first."))
+                    .catch((e) => Alert.alert("Didn't send", e?.message ?? String(e)))
+                }
+              />
+            ))}
+          </ScrollView>
 
           <View style={styles.actions}>
             <Button title="Done" onPress={onClose} style={styles.done} />

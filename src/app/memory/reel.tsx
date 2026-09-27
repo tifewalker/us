@@ -4,7 +4,9 @@ import { stopPreview } from "@/lib/music";
 import { colors, radius, space, type as typeScale } from "@/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEventListener } from "expo";
-import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
+import { Waveform } from "@/components/voice/Waveform";
+import { formatDuration } from "@/lib/voice";
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -39,6 +41,7 @@ const VIDEO_CAP_S = 60;
 // Short clips advance on playToEnd; their timer runs a little longer so the
 // two never both fire (which would skip a frame).
 const VIDEO_END_BUFFER_MS = 800;
+const VOICE_CAP_S = 120;
 
 type Frame =
   | { kind: "title" }
@@ -48,6 +51,12 @@ type Frame =
 function frameDuration(f: Frame, photoSeconds: number) {
   if (f.kind === "title") return TITLE_MS;
   if (f.kind === "end") return 0;
+  if (f.item.type === "voice") {
+    // Plays in full (voice notes are at most 2 minutes); the end event
+    // usually advances first.
+    const s = Math.min(f.item.durationSeconds ?? VOICE_CAP_S, VOICE_CAP_S);
+    return s * 1000 + VIDEO_END_BUFFER_MS;
+  }
   if (f.item.type === "video") {
     // duration_seconds is whole SECONDS (not ms). Unknown length → the cap,
     // and playToEnd advances earlier if the clip is shorter.
@@ -77,7 +86,8 @@ export default function MemoryReel() {
   // "Tap to begin" card; the tap starts the soundtrack synchronously.
   const isWeb = Platform.OS === "web";
   const [started, setStarted] = useState(!isWeb);
-  const paused = held || !appActive || speedOpen || !started;
+  const [voiceWaitingAt, setVoiceWaitingAt] = useState<number | null>(null);
+  const paused = held || !appActive || speedOpen || !started || voiceWaitingAt === index;
   // Web: reel videos start muted (muted autoplay is allowed); "Tap for sound"
   // unmutes the current one inside the tap. Native plays with sound.
   const currentVideo = useRef<ReturnType<typeof useVideoPlayer> | null>(null);
@@ -85,6 +95,9 @@ export default function MemoryReel() {
   const onVideoPlayer = useCallback((p: ReturnType<typeof useVideoPlayer> | null) => {
     currentVideo.current = p;
   }, []);
+  // Web: a voice note tries to play by itself; if Safari blocks it, the frame
+  // holds on "Tap to listen" (the timer waits) and the tap starts it.
+  const currentVoice = useRef<ReturnType<typeof useAudioPlayer> | null>(null);
 
 
   useEffect(() => {
@@ -237,6 +250,7 @@ export default function MemoryReel() {
   // and the next image is already loading while the current one shows.
   const mounted = [index, index + 1].filter((i) => i < frames.length);
   const currentIsVideo = current?.kind === "media" && current.item.type === "video";
+  const currentIsVoice = current?.kind === "media" && current.item.type === "voice";
   const currentVideoSound = !isWeb || (current?.kind === "media" && soundOnFor === current.item.id);
 
   function soundOn() {
@@ -251,6 +265,14 @@ export default function MemoryReel() {
     }
   }
 
+  function listen() {
+    // inside the tap: Safari allows this audio element to start here
+    try {
+      currentVoice.current?.play();
+    } catch {}
+    setVoiceWaitingAt(null);
+  }
+
   function begin() {
     // inside the tap: Safari allows audio to start here
     try {
@@ -262,7 +284,7 @@ export default function MemoryReel() {
   return (
     <GestureHandlerRootView style={styles.root}>
       {songUrl ? (
-        <ReelSoundtrack player={songPlayer} playing={!paused} ducked={currentIsVideo && currentVideoSound} />
+        <ReelSoundtrack player={songPlayer} playing={!paused} ducked={(currentIsVideo && currentVideoSound) || currentIsVoice} />
       ) : null}
       <GestureDetector gesture={pan}>
         <Animated.View style={[styles.root, dragStyle]}>
@@ -280,8 +302,13 @@ export default function MemoryReel() {
               counts={{
                 photos: mediaFrames.filter((f) => f.item.type === "photo").length,
                 videos: mediaFrames.filter((f) => f.item.type === "video").length,
+                voices: mediaFrames.filter((f) => f.item.type === "voice").length,
               }}
               onEnded={goNext}
+              onVoiceBlocked={(p) => {
+                currentVoice.current = p;
+                setVoiceWaitingAt(i);
+              }}
               onReplay={() => setIndex(0)}
               onClose={close}
               onVideoPlayer={onVideoPlayer}
@@ -363,6 +390,14 @@ export default function MemoryReel() {
             </Pressable>
           )}
 
+          {isWeb && started && currentIsVoice && voiceWaitingAt === index && (
+            <Pressable onPress={listen} style={[styles.soundChip, { bottom: insets.bottom + space.xl }]} accessibilityRole="button" accessibilityLabel="Play the voice note">
+              <Body variant="small" color={colors.onDark}>
+                🔊 Tap to listen
+              </Body>
+            </Pressable>
+          )}
+
           {!started && (
             <Pressable onPress={begin} style={styles.beginOverlay} accessibilityRole="button" accessibilityLabel="Tap to begin">
               <View style={styles.beginCard}>
@@ -436,6 +471,7 @@ function FrameView({
   onReplay,
   onClose,
   onVideoPlayer,
+  onVoiceBlocked,
 }: {
   frame: Frame;
   isCurrent: boolean;
@@ -445,11 +481,12 @@ function FrameView({
   memory: any;
   date: Date | null;
   firstPhoto?: ResolvedMedia;
-  counts: { photos: number; videos: number };
+  counts: { photos: number; videos: number; voices: number };
   onEnded: () => void;
   onReplay: () => void;
   onClose: () => void;
   onVideoPlayer: (p: ReturnType<typeof useVideoPlayer> | null) => void;
+  onVoiceBlocked: (p: ReturnType<typeof useAudioPlayer>) => void;
 }) {
   // Crossfade: the next frame waits underneath at opacity 0.
   const visible = useSharedValue(isCurrent ? 1 : 0);
@@ -488,11 +525,16 @@ function FrameView({
         <ReelVideo item={frame.item} playing={isCurrent && !paused} onEnded={onEnded} onPlayer={isCurrent ? onVideoPlayer : undefined} />
       )}
 
+      {frame.kind === "media" && frame.item.type === "voice" && (
+        <ReelVoice item={frame.item} backdrop={firstPhoto} playing={isCurrent && !paused} onEnded={onEnded} onBlocked={onVoiceBlocked} />
+      )}
+
       {frame.kind === "end" && (
         <View style={styles.card}>
           <Icon3D name="sparklingHeart" size={72} />
           <Handwritten color={colors.sand} center style={styles.endLine}>
             {counts.photos} {counts.photos === 1 ? "photo" : "photos"}, {counts.videos} {counts.videos === 1 ? "video" : "videos"}
+            {counts.voices > 0 ? `, ${counts.voices} ${counts.voices === 1 ? "voice note" : "voice notes"}` : ""}
             {date ? ` — ${formatLongDate(date)}` : ""}
           </Handwritten>
           <Title variant="titleItalic" color={colors.onDark} center>
@@ -590,6 +632,70 @@ function ReelSoundtrack({
   return null;
 }
 
+// A voice note in the reel: a big paper waveform card over the blurred first
+// photo, playing with sound (the soundtrack ducks). Web: if the browser blocks
+// the autoplay, onBlocked hands the player up so a tap can start it.
+function ReelVoice({
+  item,
+  backdrop,
+  playing,
+  onEnded,
+  onBlocked,
+}: {
+  item: ResolvedMedia;
+  backdrop?: ResolvedMedia;
+  playing: boolean;
+  onEnded: () => void;
+  onBlocked: (p: ReturnType<typeof useAudioPlayer>) => void;
+}) {
+  const { width } = useWindowDimensions();
+  const source = useMemo(() => ({ uri: item.url }), [item.url]);
+  const player = useAudioPlayer(source, { updateInterval: 100 });
+  const status = useAudioPlayerStatus(player);
+  const ended = useRef(false);
+
+  useEffect(() => {
+    if (playing) player.play();
+    else player.pause();
+  }, [playing, player]);
+
+  useEffect(() => {
+    if (status.didJustFinish && playing && !ended.current) {
+      ended.current = true;
+      onEnded();
+    }
+  }, [status.didJustFinish, playing, onEnded]);
+
+  useEffect(() => {
+    if (!playing || Platform.OS !== "web") return;
+    const t = setTimeout(() => {
+      if (!player.playing && player.currentTime < 0.05) onBlocked(player);
+    }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, player]);
+
+  const duration = status.duration || item.durationSeconds || 1;
+  const cardWidth = Math.min(width - space.xl * 2, 420);
+  return (
+    <View style={styles.card}>
+      {backdrop?.thumbUrl ? (
+        <Image source={{ uri: backdrop.thumbUrl, cacheKey: backdrop.thumbCacheKey ?? undefined }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={28} />
+      ) : null}
+      <View style={styles.scrim} />
+      <View style={[styles.voiceCard, { width: cardWidth }]}>
+        <Handwritten color={colors.inkSoft}>a voice note</Handwritten>
+        <View style={styles.voiceWave}>
+          <Waveform values={item.waveform ?? []} progress={Math.min(1, status.currentTime / duration)} color={colors.paperEdge} playedColor={colors.ocean} height={72} />
+        </View>
+        <Body variant="small" color={colors.inkSoft} style={styles.voiceTime}>
+          {formatDuration(status.currentTime)} / {formatDuration(duration)}
+        </Body>
+      </View>
+    </View>
+  );
+}
+
 function ReelVideo({
   item,
   playing,
@@ -644,6 +750,15 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(7,26,43,0.45)" },
   cardTitle: { fontSize: 36, lineHeight: 42 },
   endLine: { marginTop: space.md },
+  voiceCard: {
+    backgroundColor: colors.warmWhite,
+    borderRadius: radius.paper,
+    padding: space.xl,
+    gap: space.md,
+    transform: [{ rotate: "-1.5deg" }],
+  },
+  voiceWave: { height: 72, flexDirection: "row" },
+  voiceTime: { textAlign: "right", fontVariant: ["tabular-nums"] },
   endButtons: { flexDirection: "row", gap: space.md, marginTop: space.xl },
   zones: { flex: 1, flexDirection: "row" },
   zoneLeft: { flex: 35 },

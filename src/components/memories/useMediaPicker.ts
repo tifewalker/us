@@ -1,4 +1,5 @@
-import { generateVideoThumbnail, uploadMemoryMedia } from "@/lib/memories";
+import { addMemoryVoice, generateVideoThumbnail, uploadMemoryMedia } from "@/lib/memories";
+import type { LocalVoice } from "@/lib/voice";
 import { localFileSize, MAX_UPLOAD_BYTES } from "@/lib/upload";
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
@@ -15,6 +16,7 @@ export type UploadProgress = { index: number; total: number; fraction: number };
 // per-file progress. A failed file never stops the rest.
 export function useMediaPicker(logTag = "MediaPicker") {
   const [assets, setAssets] = useState<PickedAsset[]>([]);
+  const [voices, setVoices] = useState<LocalVoice[]>([]);
   const [preparing, setPreparing] = useState(false);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
 
@@ -94,12 +96,22 @@ export function useMediaPicker(logTag = "MediaPicker") {
     setAssets((prev) => prev.filter((a) => a.uri !== uri));
   }
 
-  // Runs `upload` for every picked asset, one after another, with per-file
+  function addVoice(v: LocalVoice) {
+    setVoices((prev) => [...prev, v]);
+  }
+
+  function removeVoice(uri: string) {
+    setVoices((prev) => prev.filter((v) => v.uri !== uri));
+  }
+
+  // Runs `upload` for every picked asset (then `uploadVoiceNote` for every
+  // recorded voice note, if given), one after another, with per-file
   // progress. Returns human-readable labels for the files that failed.
   async function uploadEach(
     upload: (asset: PickedAsset, mediaType: "photo" | "video", onProgress: (f: number) => void) => Promise<void>,
+    uploadVoiceNote?: (voice: LocalVoice, onProgress: (f: number) => void) => Promise<void>,
   ): Promise<string[]> {
-    const total = assets.length;
+    const total = assets.length + (uploadVoiceNote ? voices.length : 0);
     const failed: string[] = [];
     try {
       for (const [i, asset] of assets.entries()) {
@@ -111,6 +123,19 @@ export function useMediaPicker(logTag = "MediaPicker") {
         } catch (err: any) {
           console.log(`[${logTag}] ${label} failed:`, err.message);
           failed.push(`${label}: ${err.message ?? String(err)}`);
+        }
+      }
+      if (uploadVoiceNote) {
+        for (const [j, voice] of voices.entries()) {
+          const i = assets.length + j;
+          const label = `Voice note ${j + 1}`;
+          setProgress({ index: i + 1, total, fraction: 0 });
+          try {
+            await uploadVoiceNote(voice, (f) => setProgress({ index: i + 1, total, fraction: f }));
+          } catch (err: any) {
+            console.log(`[${logTag}] ${label} failed:`, err.message);
+            failed.push(`${label}: ${err.message ?? String(err)}`);
+          }
         }
       }
     } finally {
@@ -131,12 +156,14 @@ export function useMediaPicker(logTag = "MediaPicker") {
         thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType,
         onProgress,
       }).then(() => undefined),
+      (voice, onProgress) => addMemoryVoice({ coupleId, memoryId, voice, onProgress }).then(() => undefined),
     );
   }
 
   function clear() {
     setAssets([]);
+    setVoices([]);
   }
 
-  return { assets, preparing, progress, pick, remove, uploadAll, uploadEach, clear };
+  return { assets, voices, preparing, progress, pick, remove, addVoice, removeVoice, uploadAll, uploadEach, clear };
 }

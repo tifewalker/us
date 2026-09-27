@@ -1,5 +1,7 @@
 import { MediaTray } from "@/components/memories/MediaTray";
 import { useMediaPicker } from "@/components/memories/useMediaPicker";
+import { VoiceNotesField } from "@/components/voice/VoiceNotesField";
+import { MAX_VOICE_SECONDS } from "@/lib/voice";
 import { Body, Button, ScreenBackground, Title } from "@/components/ui";
 import { getMemoryById } from "@/lib/memories";
 import { colors, GUTTER, space } from "@/theme";
@@ -29,8 +31,8 @@ export default function AddMedia() {
 
   async function handleUpload() {
     if (!memory) return;
-    if (media.assets.length === 0) {
-      Alert.alert("Nothing picked yet", "Choose a photo or video first.");
+    if (media.assets.length === 0 && media.voices.length === 0) {
+      Alert.alert("Nothing picked yet", "Choose a photo or video, or record a voice note first.");
       return;
     }
     setBusy(true);
@@ -68,9 +70,18 @@ export default function AddMedia() {
           onPick={media.pick}
           onRemove={media.remove}
         />
+          <VoiceNotesField
+          voices={media.voices}
+          onAdd={media.addVoice}
+          onRemove={media.removeVoice}
+          max={5}
+          maxSeconds={MAX_VOICE_SECONDS}
+          disabled={busy}
+          style={styles.voice}
+        />
 
         <Button
-          title={media.assets.length > 1 ? `Add these ${media.assets.length}` : "Add to memory"}
+          title={media.assets.length + media.voices.length > 1 ? `Add these ${media.assets.length + media.voices.length}` : "Add to memory"}
           icon="heart"
           onPress={handleUpload}
           loading={busy && !media.progress}
@@ -85,6 +96,7 @@ export default function AddMedia() {
 
 const styles = StyleSheet.create({
   content: { paddingHorizontal: GUTTER },
+  voice: { marginTop: space.xl },
   lead: { marginTop: space.xs },
   save: { marginTop: space.xxl },
 });

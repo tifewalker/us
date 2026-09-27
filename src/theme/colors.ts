@@ -44,6 +44,19 @@ export const skies = {
 } as const;
 export type SkyName = keyof typeof skies;
 
+// March 29 — anniversary sunset (all day on the anniversary): deeper violet →
+// coral → peach than golden hour, with the sun resting low on the horizon.
+export const anniversarySky = ["#3A1E52", "#D9507A", "#FF9E6D"] as const;
+export const anniversary = {
+  lantern: "#FFB86B",
+  lanternGlow: "#FFD9A0",
+  lanternFrame: "#C0613A",
+  stone: "#CFC2B0",
+  stoneShadow: "#A89A87",
+  stoneInk: "#6E5F52",
+  sandWriting: "#D9AE6E", // finger-drawn letters (darker than scene.sand)
+} as const;
+
 // Keyframes the beach blends between smoothly, by local hour (0–24).
 // Between two keyframes the colors are interpolated; the list wraps at midnight.
 export const skyKeyframes: { hour: number; sky: SkyName }[] = [

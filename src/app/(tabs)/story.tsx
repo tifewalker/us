@@ -91,7 +91,7 @@ export default function Story() {
           date: parseDate(r.memory_date, r.created_at),
           hasSong: !!r.song,
           bothSides: both.has(r.id),
-          media: r.memory_media ?? [],
+          media: (r.memory_media ?? []).filter((m: MediaRow) => m.media_type !== "voice"), // voice notes have no picture
         })),
       );
       // Signed URLs expire; re-sign on each visit (images stay cached by storage path).

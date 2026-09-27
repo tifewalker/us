@@ -11,14 +11,26 @@ const STAR_GROUPS = 3;
 const STARS_PER_GROUP = 7;
 
 // Layer 1–2: time-of-day sky gradient, sun or moon on its arc, twinkling stars.
-export function Sky({ layout, hour, active }: { layout: BeachLayout; hour: number; active: boolean }) {
+// `sunset` (anniversary mode): a fixed palette all day and a big low sun
+// resting near the horizon — no stars, no moon.
+export function Sky({
+  layout,
+  hour,
+  active,
+  sunset,
+}: {
+  layout: BeachLayout;
+  hour: number;
+  active: boolean;
+  sunset?: { colors: readonly [string, string, string]; sunT: number };
+}) {
   const { W, shoreY, horizonY, insets } = layout;
-  const [top, mid, bottom] = skyAt(hour);
-  const night = nightFactor(hour);
-  const { body, t } = celestial(hour);
+  const [top, mid, bottom] = sunset ? sunset.colors : skyAt(hour);
+  const night = sunset ? 0 : nightFactor(hour);
+  const { body, t } = sunset ? { body: "sun" as const, t: sunset.sunT } : celestial(hour);
 
   // Arc from the left horizon, up to near the top safe area, down to the right.
-  const r = body === "sun" ? 26 : 20;
+  const r = sunset ? 34 : body === "sun" ? 26 : 20;
   const arcTop = insets.top + 70;
   const cx = W * (0.08 + 0.84 * t);
   const cy = horizonY - Math.sin(Math.PI * t) * (horizonY - arcTop) + r * 0.4;
@@ -39,8 +51,8 @@ export function Sky({ layout, hour, active }: { layout: BeachLayout; hour: numbe
         <Circle cx={cx + 2} cy={cy + 3} r={r} fill="#000" opacity={0.1} />
         {body === "sun" ? (
           <>
-            <Circle cx={cx} cy={cy} r={r + 10} fill={scene.sun} opacity={0.25} />
-            <Circle cx={cx} cy={cy} r={r} fill={scene.sun} />
+            <Circle cx={cx} cy={cy} r={r + (sunset ? 22 : 10)} fill={scene.sun} opacity={sunset ? 0.3 : 0.25} />
+            <Circle cx={cx} cy={cy} r={r} fill={sunset ? "#FFC47A" : scene.sun} />
           </>
         ) : (
           <Path

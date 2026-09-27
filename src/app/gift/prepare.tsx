@@ -3,6 +3,8 @@ import { useMediaPicker } from "@/components/memories/useMediaPicker";
 import { SongCard } from "@/components/music/SongCard";
 import { SongPicker } from "@/components/music/SongPicker";
 import { usePreviewStopOnBlur } from "@/components/music/usePreviewStopOnBlur";
+import { VoiceNotesField } from "@/components/voice/VoiceNotesField";
+import { VoiceTag } from "@/components/voice/VoiceTag";
 import {
     Body,
     Button,
@@ -18,7 +20,9 @@ import { getMyCouple } from "@/lib/couples";
 import { nextOccurrence } from "@/lib/dates";
 import {
     addGiftMedia,
+    addGiftVoice,
     getGift,
+    MAX_SEALED_VOICES,
     getMyLatestGift,
     nextBirthdayUnlock,
     removeGiftMedia,
@@ -30,6 +34,7 @@ import {
 import { birthdayOf, getImportantDates } from "@/lib/importantDates";
 import type { MediaRef } from "@/lib/memories";
 import type { Song } from "@/lib/music";
+import { asWaveform, MAX_VOICE_SECONDS } from "@/lib/voice";
 import { colors, fonts, GUTTER, radius, shadows, space } from "@/theme";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
@@ -108,7 +113,7 @@ export default function PrepareGift() {
       Alert.alert("Write a letter", "The letter is the heart of the surprise.");
       return;
     }
-    if (existing.length + media.assets.length > MAX_MEDIA) {
+    if (existing.filter((m) => m.media_type !== "voice").length + media.assets.length > MAX_MEDIA) {
       Alert.alert("Too many", `Up to ${MAX_MEDIA} photos and videos.`);
       return;
     }
@@ -130,6 +135,8 @@ export default function PrepareGift() {
         added.push(
           await addGiftMedia(saved, { uri: asset.uri, mediaType, durationMs: asset.duration, thumbnailUri: asset.thumbnailUri, mimeType: asset.mimeType }, onProgress),
         );
+      }, async (voice, onProgress) => {
+        added.push(await addGiftVoice(saved, voice, onProgress));
       });
       if (added.length) await setGiftMedia(saved.id, [...existing, ...added]);
       media.clear();
@@ -143,6 +150,9 @@ export default function PrepareGift() {
       setSaving(false);
     }
   }
+
+  const existingVisual = existing.filter((m) => m.media_type !== "voice");
+  const existingVoices = existing.filter((m) => m.media_type === "voice");
 
   if (!ctx) {
     return (
@@ -193,9 +203,9 @@ export default function PrepareGift() {
           <Body variant="label" color={colors.inkSoft} style={styles.label}>
             Photos and videos (optional, up to {MAX_MEDIA})
           </Body>
-          {existing.length > 0 && (
+          {existingVisual.length > 0 && (
             <View style={styles.existing}>
-              {existing.map((m) => {
+              {existingVisual.map((m) => {
                 const uri = thumbs[m.media_type === "photo" ? m.storage_path : (m.thumbnail_path ?? "")];
                 return (
                   <PressableScale
@@ -220,9 +230,41 @@ export default function PrepareGift() {
             assets={media.assets}
             preparing={media.preparing}
             progress={media.progress}
-            disabled={saving || existing.length + media.assets.length >= MAX_MEDIA}
+            disabled={saving || existingVisual.length + media.assets.length >= MAX_MEDIA}
             onPick={media.pick}
             onRemove={media.remove}
+          />
+
+          <Body variant="label" color={colors.inkSoft} style={styles.label}>
+            Voice notes (optional, up to {MAX_SEALED_VOICES}, 2 minutes each)
+          </Body>
+          {existingVoices.map((m) => (
+            <VoiceTag
+              key={m.storage_path}
+              id={m.storage_path}
+              playKey={m.storage_path}
+              uri={thumbs[m.storage_path] ?? null}
+              durationSeconds={m.duration_seconds ?? 0}
+              waveform={asWaveform(m.waveform)}
+              label="in the surprise · long-press to remove"
+              onLongPress={() =>
+                Alert.alert("Remove this voice note?", undefined, [
+                  { text: "Keep it", style: "cancel" },
+                  { text: "Remove", style: "destructive", onPress: () => removeExisting(m) },
+                ])
+              }
+              style={styles.voiceTag}
+            />
+          ))}
+          <VoiceNotesField
+            voices={media.voices}
+            onAdd={media.addVoice}
+            onRemove={media.removeVoice}
+            max={MAX_SEALED_VOICES}
+            existingCount={existingVoices.length}
+            maxSeconds={MAX_VOICE_SECONDS}
+            recorderLabel={`Say happy birthday to ${ctx.partnerName}`}
+            disabled={saving}
           />
 
           <Button title={gift ? "Save the surprise" : "Seal the surprise"} icon="gift" onPress={save} loading={saving && !media.progress} disabled={saving || media.preparing} style={styles.save} />
@@ -235,6 +277,7 @@ export default function PrepareGift() {
 }
 
 const styles = StyleSheet.create({
+  voiceTag: { marginBottom: space.md },
   flex: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   content: { paddingHorizontal: GUTTER },

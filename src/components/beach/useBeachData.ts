@@ -1,3 +1,4 @@
+import { anniversaryStatus, yearStoneItems, yearStonesFrom } from "@/lib/anniversary";
 import { getCurrentUser, getUserName } from "@/lib/auth";
 import { getMyCouple } from "@/lib/couples";
 import { isToday, parseLocalDate, startOfToday } from "@/lib/dates";
@@ -55,6 +56,8 @@ export type BeachData = {
   jar: { total: number; unopened: number }; // my open-when notes
   newMemoryFromPartner: { id: string; title: string } | null; // last 3 days, I haven't written my side
   rememberPool: Awaited<ReturnType<typeof getRememberPool>>;
+  anniversary: { isToday: boolean; year: number | null; reached: number }; // local date
+  yearStones: number; // stones on the beach (one per anniversary reached; permanent)
 };
 
 // Everything the beach needs, refreshed every time Home gains focus (so a new
@@ -96,12 +99,16 @@ export function useBeachData() {
       const upcoming = buildUpcoming(couple.relationship_start, dates, nameOf);
       const bdayToday = dates.find((d) => d.type === "birthday" && d.person_id && isToday(d.date));
 
-      // The beach never shrinks: keep the highest chapter ever reached.
+      // The beach never shrinks: keep the highest chapter ever reached, and
+      // a year stone for every anniversary reached (stored with the items).
       const derived = chapterFor(counts.memories, counts.completedActivities);
       const stored = (world?.chapter ?? 1) as ChapterNumber;
       const chapter = Math.max(derived, stored) as ChapterNumber;
-      if (!world || world.chapter !== chapter) {
-        saveWorld(couple.id, chapter, unlockedItems(chapter)).catch((e) =>
+      const anniv = anniversaryStatus(couple.relationship_start);
+      const storedStones = yearStonesFrom(world?.unlocked_items);
+      const stones = Math.max(anniv.reached, storedStones.length ? storedStones[storedStones.length - 1] : 0);
+      if (!world || world.chapter !== chapter || storedStones.length < stones) {
+        saveWorld(couple.id, chapter, [...unlockedItems(chapter), ...yearStoneItems(stones)]).catch((e) =>
           console.log("[Beach] saveWorld failed:", e.message),
         );
       }
@@ -146,6 +153,8 @@ export function useBeachData() {
         newMemoryFromPartner: recentPartner,
         rememberPool,
         unlockedGiftId: unopened[0]?.id ?? null,
+        anniversary: anniv,
+        yearStones: stones,
       });
       setError(null);
     } catch (err: any) {

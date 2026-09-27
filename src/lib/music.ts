@@ -108,28 +108,74 @@ export async function openFullSong(song: Song) {
   await Linking.openURL(url);
 }
 
-// ---- One shared preview player ---------------------------------------------
-// Only one 30s preview plays at a time anywhere in the app. Screens call
-// stopPreview() when they lose focus (usePreviewStopOnBlur) and the app stops
-// it when backgrounding (see root layout).
+// ---- One shared audio player ------------------------------------------------
+// Only one sound plays at a time anywhere in the app: a 30s song preview OR a
+// voice note (lib/voice.ts). Screens call stopPreview() when they lose focus
+// (usePreviewStopOnBlur) and the app stops it when backgrounding (see root
+// layout) — both stop voice notes too.
 
 let player: ReturnType<typeof createAudioPlayer> | null = null;
-let state: { songId: number | null; playing: boolean } = { songId: null, playing: false };
+type SharedState = { songId: number | null; voiceKey: string | null; playing: boolean };
+let state: SharedState = { songId: null, voiceKey: null, playing: false };
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
-function setState(next: typeof state) {
+function setState(next: SharedState) {
   state = next;
   emit();
 }
 
+// Voice-note progress changes several times a second, so it has its own store
+// (song-preview consumers don't re-render on every tick).
+let progress = { key: null as string | null, position: 0, duration: 0 };
+const progressListeners = new Set<() => void>();
+function setProgress(next: typeof progress) {
+  progress = next;
+  progressListeners.forEach((l) => l());
+}
+
+let recordingMode = false;
 let audioModeSet = false;
 async function ensureAudioMode() {
-  if (audioModeSet) return;
+  if (audioModeSet && !recordingMode) return;
   audioModeSet = true;
-  // A preview is always an explicit tap, so play it even on silent; mix with
+  recordingMode = false;
+  // Playback is always an explicit tap, so play even on silent; mix with
   // video sound (the reel plays both).
-  await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "mixWithOthers" }).catch(() => {});
+  await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false, interruptionMode: "mixWithOthers" }).catch(() => {});
+}
+
+// iOS needs allowsRecording while the mic is on, and it must be switched back
+// off afterwards or playback comes out of the earpiece.
+export async function setRecordingAudioMode(on: boolean) {
+  stopPreview();
+  recordingMode = on;
+  await setAudioModeAsync(
+    on
+      ? { playsInSilentMode: true, allowsRecording: true, interruptionMode: "doNotMix" }
+      : { playsInSilentMode: true, allowsRecording: false, interruptionMode: "mixWithOthers" },
+  ).catch(() => {});
+}
+
+function getPlayer() {
+  if (!player) {
+    player = createAudioPlayer(null, { updateInterval: 100 });
+    // expo-audio's types reference expo-modules-core, which npm nested under
+    // `expo`, so TS can't see SharedObject.addListener — it exists at runtime.
+    (player as unknown as {
+      addListener: (event: "playbackStatusUpdate", cb: (s: AudioStatus) => void) => void;
+    }).addListener("playbackStatusUpdate", (s) => {
+      if (state.voiceKey) {
+        setProgress({
+          key: state.voiceKey,
+          position: s.didJustFinish ? 0 : s.currentTime,
+          duration: s.duration || progress.duration,
+        });
+      }
+      if (s.didJustFinish) setState({ ...state, playing: false });
+    });
+  }
+  return player;
 }
 
 export async function togglePreview(song: Song) {
@@ -137,35 +183,59 @@ export async function togglePreview(song: Song) {
   // Don't await before play(): iOS Safari only allows audio to start in the
   // same turn as the user's tap, and an await can lose that.
   void ensureAudioMode();
-  if (!player) {
-    player = createAudioPlayer(null);
-    // expo-audio's types reference expo-modules-core, which npm nested under
-    // `expo`, so TS can't see SharedObject.addListener — it exists at runtime.
-    (player as unknown as {
-      addListener: (event: "playbackStatusUpdate", cb: (s: AudioStatus) => void) => void;
-    }).addListener("playbackStatusUpdate", (s) => {
-      if (s.didJustFinish) setState({ ...state, playing: false });
-    });
-  }
+  const p = getPlayer();
   if (state.songId === song.itunesId) {
     if (state.playing) {
-      player.pause();
+      p.pause();
       setState({ ...state, playing: false });
     } else {
-      if (player.currentTime >= (player.duration || 30) - 0.3) void player.seekTo(0);
-      player.play();
+      if (p.currentTime >= (p.duration || 30) - 0.3) void p.seekTo(0);
+      p.play();
       setState({ ...state, playing: true });
     }
     return;
   }
-  player.replace({ uri: song.previewUrl });
-  player.play();
-  setState({ songId: song.itunesId, playing: true });
+  p.replace({ uri: song.previewUrl });
+  p.play();
+  setState({ songId: song.itunesId, voiceKey: null, playing: true });
+}
+
+// Voice notes: `key` identifies the note (its storage path, or the local uri
+// for a preview before upload); `uri` is a signed URL / local file / blob URL.
+export function toggleVoice(key: string, uri: string, knownDuration = 0) {
+  void ensureAudioMode();
+  const p = getPlayer();
+  if (state.voiceKey === key) {
+    if (state.playing) {
+      p.pause();
+      setState({ ...state, playing: false });
+    } else {
+      if (progress.position <= 0.05) void p.seekTo(0);
+      p.play();
+      setState({ ...state, playing: true });
+    }
+    return;
+  }
+  p.replace({ uri });
+  p.play();
+  setProgress({ key, position: 0, duration: knownDuration });
+  setState({ songId: null, voiceKey: key, playing: true });
+}
+
+export function seekVoice(key: string, seconds: number) {
+  if (!player || state.voiceKey !== key) return;
+  void player.seekTo(Math.max(0, seconds));
+  setProgress({ ...progress, position: Math.max(0, seconds) });
 }
 
 export function stopPreview() {
   if (player && state.playing) player.pause();
-  if (state.songId !== null || state.playing) setState({ songId: null, playing: false });
+  if (state.songId !== null || state.voiceKey !== null || state.playing) setState({ songId: null, voiceKey: null, playing: false });
+  if (progress.key) setProgress({ key: null, position: 0, duration: 0 });
+}
+
+export function getSharedAudioState() {
+  return state;
 }
 
 export function usePreviewState() {
@@ -175,5 +245,15 @@ export function usePreviewState() {
       return () => listeners.delete(cb);
     },
     () => state,
+  );
+}
+
+export function useVoiceProgress() {
+  return useSyncExternalStore(
+    (cb) => {
+      progressListeners.add(cb);
+      return () => progressListeners.delete(cb);
+    },
+    () => progress,
   );
 }

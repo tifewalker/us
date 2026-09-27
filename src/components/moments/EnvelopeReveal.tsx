@@ -1,4 +1,5 @@
-import { Button, Handwritten, successHaptic, tapHaptic, Title } from "@/components/ui";
+import { Avatar, Button, Handwritten, successHaptic, tapHaptic, Title } from "@/components/ui";
+import { useCoupleProfiles, type Profile } from "@/lib/profile";
 import type { Song } from "@/lib/music";
 import { colors, radius, shadows, space, type as typeScale } from "@/theme";
 import { Image } from "expo-image";
@@ -15,9 +16,12 @@ import Animated, {
     type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
+import { Waveform } from "@/components/voice/Waveform";
 import { FloatingHearts } from "./effects";
 
-export type RevealAnswer = { text: string | null; song: Song | null; imageUrl: string | null };
+// `voice`: the answer's waveform when it's (also) a voice note — the card shows
+// it; playback happens on the static notes after the moment.
+export type RevealAnswer = { text: string | null; song: Song | null; imageUrl: string | null; voice?: number[] | null };
 
 // Timeline (ms): my flap → my card slides out & flips → their flap → their card → hearts.
 const T = { flapA: 0, cardA: 380, flapB: 900, cardB: 1280, hearts: 2050, done: 3900 };
@@ -47,6 +51,7 @@ export function EnvelopeReveal({
 }) {
   const { width } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
+  const profiles = useCoupleProfiles();
   const envW = Math.min((width - space.xl * 2 - space.lg) / 2, 180);
   const envH = envW * 0.72;
 
@@ -106,8 +111,8 @@ export function EnvelopeReveal({
           You both answered
         </Title>
         <View style={[styles.row, { marginTop: space.lg + envH * 1.3 }]}>
-          <Envelope width={envW} height={envH} label={myName} flap={flapA} card={cardA} answer={mine} tilt={-3} />
-          <Envelope width={envW} height={envH} label={partnerName} flap={flapB} card={cardB} answer={theirs} tilt={3} />
+          <Envelope width={envW} height={envH} label={myName} flap={flapA} card={cardA} answer={mine} tilt={-3} profile={profiles.me} />
+          <Envelope width={envW} height={envH} label={partnerName} flap={flapB} card={cardB} answer={theirs} tilt={3} profile={profiles.partner} />
         </View>
         {phase === "open" && matching && (
           <Animated.View entering={FadeIn.duration(500)}>
@@ -135,6 +140,7 @@ function Envelope({
   card,
   answer,
   tilt,
+  profile,
 }: {
   width: number;
   height: number;
@@ -143,6 +149,7 @@ function Envelope({
   card: SharedValue<number>;
   answer: RevealAnswer;
   tilt: number;
+  profile?: Profile | null;
 }) {
   const cardH = height * 1.25;
   const flapStyle = useAnimatedStyle(() => ({
@@ -177,6 +184,8 @@ function Envelope({
           {label}
         </Handwritten>
       </View>
+      {/* whose envelope it is: their photo, pinned to the corner like a stamp */}
+      {profile ? <Avatar url={profile.avatarUrl} cacheKey={profile.avatarPath} name={profile.firstName} size={30} style={styles.stamp} /> : null}
       {/* flap, hinged on the top edge */}
       <Animated.View style={[styles.flapWrap, { width, height: height * 0.62, transformOrigin: "50% 0%" }, flapStyle]}>
         <Svg width={width} height={height * 0.62}>
@@ -202,6 +211,22 @@ function AnswerFace({ answer }: { answer: RevealAnswer }) {
   if (answer.imageUrl) {
     return <Image source={{ uri: answer.imageUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />;
   }
+  if (answer.voice) {
+    return (
+      <View style={styles.face}>
+        {answer.text ? (
+          <Handwritten variant="handSmall" center numberOfLines={3}>
+            {answer.text}
+          </Handwritten>
+        ) : (
+          <Text style={[typeScale.small, styles.songTitle]}>🎙️ a voice note</Text>
+        )}
+        <View style={styles.faceWave}>
+          <Waveform values={answer.voice.filter((_, i) => i % 2 === 0)} color={colors.ocean} playedColor={colors.ocean} height={28} />
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={styles.face}>
       <Handwritten variant="handSmall" center numberOfLines={5}>
@@ -226,6 +251,7 @@ const styles = StyleSheet.create({
   },
   label: { color: colors.inkOcean },
   flapWrap: { position: "absolute", left: 0, top: 0 },
+  stamp: { position: "absolute", right: -8, bottom: -8, zIndex: 4 },
   seal: { position: "absolute", width: 18, height: 18, borderRadius: 9, backgroundColor: colors.coral },
   card: {
     position: "absolute",
@@ -240,6 +266,7 @@ const styles = StyleSheet.create({
   // explicit pixel size (not % width + aspectRatio — see CLAUDE.md gotchas)
   art: { width: 64, height: 64, borderRadius: radius.photo },
   songTitle: { color: colors.ink, textAlign: "center" },
+  faceWave: { height: 28, alignSelf: "stretch", flexDirection: "row" },
   match: { marginTop: space.xl },
   button: { marginTop: space.xl, alignSelf: "center", minWidth: 200 },
 });

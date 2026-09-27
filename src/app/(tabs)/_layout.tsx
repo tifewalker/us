@@ -1,5 +1,6 @@
 import { TabBar } from "@/components/tab-bar";
 import { useAuth } from "@/hooks/useAuth";
+import { usePushLifecycle } from "@/hooks/usePushLifecycle";
 import { getMyCouple } from "@/lib/couples";
 import { Redirect } from "expo-router";
 import { Tabs } from "expo-router/tabs";
@@ -26,6 +27,9 @@ export default function TabsLayout() {
         setCheckedForUserId(session.user.id);
       });
   }, [session]);
+
+  // web push + timezone / last seen, once we know this user is paired
+  usePushLifecycle(!!session && !!couple && checkedForUserId === session.user.id);
 
   if (authLoading) return null;
 

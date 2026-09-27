@@ -2,22 +2,28 @@ import { MediaTray } from "@/components/memories/MediaTray";
 import { PolaroidDevelop } from "@/components/moments/PolaroidDevelop";
 import { MemoryFields, type MemoryFieldValues } from "@/components/memories/MemoryFields";
 import { useMediaPicker } from "@/components/memories/useMediaPicker";
+import { VoiceNotesField } from "@/components/voice/VoiceNotesField";
+import { MAX_VOICE_SECONDS } from "@/lib/voice";
 import { Body, Button, ScreenBackground, Title, toDateString } from "@/components/ui";
 import { getMyCouple } from "@/lib/couples";
 import { createMemory } from "@/lib/memories";
 import { colors, GUTTER, space } from "@/theme";
-import { router } from "expo-router";
+import { parseLocalDate } from "@/lib/dates";
+import { linkBucketMemory } from "@/lib/us";
+import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function CreateMemory() {
   const insets = useSafeAreaInsets();
+  // Prefilled from a ticked bucket-list item (?title=&date=&bucketItemId=)
+  const params = useLocalSearchParams<{ title?: string; date?: string; bucketItemId?: string }>();
   const [fields, setFields] = useState<MemoryFieldValues>({
-    title: "",
+    title: params.title ?? "",
     description: "",
     location: "",
-    date: new Date(), // defaults to today; pick a past date for older memories
+    date: params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? parseLocalDate(params.date) : new Date(), // defaults to today; pick a past date for older memories
     song: null,
   });
   const [busy, setBusy] = useState(false);
@@ -59,6 +65,10 @@ export default function CreateMemory() {
         memoryDate: fields.date ? toDateString(fields.date) : undefined,
         song: fields.song ?? null,
       });
+      if (params.bucketItemId) {
+        // link the bucket-list item to its memory; a failure here never loses the memory
+        await linkBucketMemory(params.bucketItemId, memory.id).catch((e) => console.log("[CreateMemory] bucket link failed:", e.message));
+      }
 
       // Sequential upload (see useMediaPicker); a failure doesn't stop the rest.
       const failed = await media.uploadAll(couple.id, memory.id);
@@ -106,6 +116,15 @@ export default function CreateMemory() {
             onPick={media.pick}
             onRemove={media.remove}
           />
+          <VoiceNotesField
+            voices={media.voices}
+            onAdd={media.addVoice}
+            onRemove={media.removeVoice}
+            max={5}
+            maxSeconds={MAX_VOICE_SECONDS}
+            disabled={busy}
+            style={styles.voice}
+          />
 
           <Button
             title="Save memory"
@@ -130,6 +149,7 @@ export default function CreateMemory() {
 }
 
 const styles = StyleSheet.create({
+  voice: { marginTop: space.xl },
   flex: { flex: 1 },
   content: { paddingHorizontal: GUTTER },
   lead: { marginTop: space.xs },

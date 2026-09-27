@@ -5,6 +5,7 @@ import { getMyCouple } from "@/lib/couples";
 import { SongCard } from "@/components/music/SongCard";
 import { usePreviewStopOnBlur } from "@/components/music/usePreviewStopOnBlur";
 import { MediaGrid } from "@/components/memories/MediaGrid";
+import { VoiceTag } from "@/components/voice/VoiceTag";
 import {
     ActionSheet,
     Body,
@@ -61,7 +62,8 @@ export default function MemoryPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [gridOpen, setGridOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [removeIndex, setRemoveIndex] = useState<number | null>(null);
+  // the photo / video / voice note being removed (long-press)
+  const [removing, setRemoving] = useState<ResolvedMedia | null>(null);
   const [busy, setBusy] = useState(false);
   const [people, setPeople] = useState<{ myId: string; myName: string; partnerName: string } | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -123,15 +125,15 @@ export default function MemoryPage() {
   }
 
   async function handleRemoveItem() {
-    if (removeIndex === null) return;
-    const item = media[removeIndex];
+    if (!removing) return;
+    const item = removing;
     setBusy(true);
     try {
       await removeMediaItem({ id: item.id, storage_path: item.storagePath, thumbnail_path: item.thumbnailPath });
-      setRemoveIndex(null);
+      setRemoving(null);
       await load();
     } catch (err: any) {
-      setRemoveIndex(null);
+      setRemoving(null);
       setTimeout(() => Alert.alert("Couldn't remove that", err.message ?? String(err)), MODAL_GAP);
     } finally {
       setBusy(false);
@@ -157,10 +159,14 @@ export default function MemoryPage() {
   }
 
   const date = parseDate(memory.memory_date);
+  // Photos/videos go in the collage (and viewer/grid, same indexes); voice
+  // notes are paper tags underneath.
+  const visual = media.filter((m) => m.type !== "voice");
+  const voices = media.filter((m) => m.type === "voice");
   const photoCount = media.filter((m) => m.type === "photo").length;
   const videoCount = media.filter((m) => m.type === "video").length;
+  const voiceCount = voices.length;
   const contentWidth = width - GUTTER * 2;
-  const removing = removeIndex !== null ? media[removeIndex] : null;
 
   return (
     <ScreenBackground padded={false}>
@@ -181,16 +187,33 @@ export default function MemoryPage() {
           </PressableScale>
         </View>
 
-        {media.length > 0 ? (
+        {visual.length > 0 && (
           <Collage
-            items={media}
+            items={visual}
             width={contentWidth}
             focused={focused}
             onOpen={openViewer}
-            onLongPress={setRemoveIndex}
+            onLongPress={(i) => setRemoving(visual[i])}
             onMore={() => setGridOpen(true)}
           />
-        ) : (
+        )}
+        {voices.length > 0 && (
+          <View style={styles.voices}>
+            {voices.map((v, i) => (
+              <VoiceTag
+                key={v.id}
+                id={v.id}
+                playKey={v.storagePath}
+                uri={v.url}
+                durationSeconds={v.durationSeconds ?? 0}
+                waveform={v.waveform ?? []}
+                onLongPress={() => setRemoving(v)}
+                style={[styles.voiceTag, i % 2 === 1 && styles.voiceTagRight]}
+              />
+            ))}
+          </View>
+        )}
+        {media.length === 0 && (
           <EmptyState
             icon="camera"
             message="No photos or videos in this memory yet."
@@ -228,7 +251,11 @@ export default function MemoryPage() {
         )}
         {media.length > 0 && (
           <Body variant="small" color={colors.inkSoft} center style={styles.counts}>
-            {[photoCount && `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`, videoCount && `${videoCount} ${videoCount === 1 ? "video" : "videos"}`]
+            {[
+              photoCount && `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`,
+              videoCount && `${videoCount} ${videoCount === 1 ? "video" : "videos"}`,
+              voiceCount && `${voiceCount} ${voiceCount === 1 ? "voice note" : "voice notes"}`,
+            ]
               .filter(Boolean)
               .join(", ")}
           </Body>
@@ -236,7 +263,7 @@ export default function MemoryPage() {
 
         {people && (
           <View onLayout={(e) => setReflectY(e.nativeEvent.layout.y)}>
-            <Perspectives memoryId={id} myId={people.myId} myName={people.myName} partnerName={people.partnerName} />
+            <Perspectives coupleId={memory.couple_id} memoryId={id} myId={people.myId} myName={people.myName} partnerName={people.partnerName} />
           </View>
         )}
       </ScrollView>
@@ -246,14 +273,14 @@ export default function MemoryPage() {
         onClose={() => setMenuOpen(false)}
         actions={[
           { label: "Edit", icon: "loveLetter", onPress: () => router.push({ pathname: "/memory/edit", params: { id } }) },
-          { label: "Add photos or videos", icon: "camera", onPress: () => router.push({ pathname: "/memory/add-media", params: { id } }) },
+          { label: "Add photos, videos or voice", icon: "camera", onPress: () => router.push({ pathname: "/memory/add-media", params: { id } }) },
           { label: "Delete", icon: "wave", destructive: true, onPress: () => setConfirmDelete(true) },
         ]}
       />
 
       <MediaGrid
         visible={gridOpen}
-        items={media}
+        items={visual}
         onClose={() => setGridOpen(false)}
         onOpen={(i) => {
           setGridOpen(false);
@@ -261,14 +288,14 @@ export default function MemoryPage() {
         }}
         onLongPress={(i) => {
           setGridOpen(false);
-          setTimeout(() => setRemoveIndex(i), MODAL_GAP);
+          setTimeout(() => setRemoving(visual[i]), MODAL_GAP);
         }}
       />
 
       <ConfirmSheet
         visible={confirmDelete}
         title="Delete this memory?"
-        message="Its photos and videos will be removed for both of you."
+        message="Its photos, videos and voice notes will be removed for both of you."
         confirmLabel="Delete memory"
         cancelLabel="Keep it"
         busy={busy}
@@ -278,13 +305,13 @@ export default function MemoryPage() {
 
       <ConfirmSheet
         visible={removing !== null}
-        title={removing?.type === "video" ? "Remove this video?" : "Remove this photo?"}
+        title={removing?.type === "video" ? "Remove this video?" : removing?.type === "voice" ? "Remove this voice note?" : "Remove this photo?"}
         message="It will be taken out of this memory for both of you."
         confirmLabel="Remove from memory"
         cancelLabel="Keep it"
         busy={busy}
         onConfirm={handleRemoveItem}
-        onCancel={() => setRemoveIndex(null)}
+        onCancel={() => setRemoving(null)}
       />
     </ScreenBackground>
   );
@@ -293,6 +320,9 @@ export default function MemoryPage() {
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   content: { paddingHorizontal: GUTTER },
+  voices: { marginTop: space.lg, gap: space.lg },
+  voiceTag: { width: "88%" },
+  voiceTagRight: { alignSelf: "flex-end" },
   topBar: { flexDirection: "row", justifyContent: "space-between", marginBottom: space.lg },
   roundButton: {
     width: 40,

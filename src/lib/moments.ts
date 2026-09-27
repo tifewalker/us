@@ -77,6 +77,6 @@ export function answersMatch(
   const norm = (s?: string | null) => (s ?? "").trim().toLowerCase();
   const x = norm(a.response);
   const y = norm(b.response);
-  if (!x || x === "📸" || x === "🎵") return false; // photo / song placeholders never "match" as text
+  if (!x || x === "📸" || x === "🎵" || x === "🎙️") return false; // photo / song / voice placeholders never "match" as text
   return x === y;
 }

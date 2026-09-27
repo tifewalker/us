@@ -3,8 +3,9 @@ import { selectionHaptic } from "@/components/ui/haptics";
 import { colors, radius, shadows, space, springs, TAB_BAR_HEIGHT, type as typeScale } from "@/theme";
 import { BlurView } from "expo-blur";
 import type { BottomTabBarProps } from "expo-router/tabs";
+import { refreshPlayBadge, usePlayBadge } from "@/lib/playBadge";
 import { useEffect } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { AppState, Pressable, StyleSheet, View } from "react-native";
 import Animated, {
     useAnimatedStyle,
     useReducedMotion,
@@ -26,6 +27,20 @@ const TABS: Record<string, { icon: Icon3DName; label: string }> = {
 // spring and its label appears; inactive: smaller, no label. See DESIGN.md.
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const playWaiting = usePlayBadge();
+
+  // Re-check the Play dot on every tab switch, when the app comes back, and every 2 minutes.
+  useEffect(() => {
+    refreshPlayBadge();
+  }, [state.index]);
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => s === "active" && refreshPlayBadge());
+    const t = setInterval(refreshPlayBadge, 120_000);
+    return () => {
+      sub.remove();
+      clearInterval(t);
+    };
+  }, []);
 
   return (
     <View
@@ -48,6 +63,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               icon={tab.icon}
               label={tab.label}
               focused={focused}
+              dot={route.name === "play" && playWaiting}
               onPress={() => {
                 const event = navigation.emit({
                   type: "tabPress",
@@ -72,12 +88,14 @@ function TabItem({
   icon,
   label,
   focused,
+  dot = false,
   onPress,
   onLongPress,
 }: {
   icon: Icon3DName;
   label: string;
   focused: boolean;
+  dot?: boolean;
   onPress: () => void;
   onLongPress: () => void;
 }) {
@@ -111,11 +129,12 @@ function TabItem({
       onLongPress={onLongPress}
       style={styles.item}
       accessibilityRole="tab"
-      accessibilityLabel={label}
+      accessibilityLabel={dot ? `${label}, something is waiting` : label}
       accessibilityState={{ selected: focused }}
     >
       <Animated.View style={iconStyle}>
         <Icon3D name={icon} size={34} />
+        {dot && <View style={styles.dot} accessibilityLabel="Something is waiting" />}
       </Animated.View>
       <Animated.Text style={[typeScale.small, styles.label, labelStyle]} numberOfLines={1}>
         {label}
@@ -141,6 +160,17 @@ const styles = StyleSheet.create({
   },
   tint: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(251,241,225,0.72)" },
   item: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 10 },
+  dot: {
+    position: "absolute",
+    top: 0,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.coral,
+    borderWidth: 1.5,
+    borderColor: colors.warmWhite,
+  },
   label: {
     color: colors.inkOcean,
     position: "absolute",

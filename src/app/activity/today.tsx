@@ -23,6 +23,11 @@ import { PaperBoat } from '@/components/moments/effects';
 import { SongCard } from '@/components/music/SongCard';
 import { SongPicker } from '@/components/music/SongPicker';
 import { usePreviewStopOnBlur } from '@/components/music/usePreviewStopOnBlur';
+import { NotifyPromptCard } from '@/components/settings/NotifyPromptCard';
+import { AnswerVoice } from '@/components/voice/AnswerVoice';
+import { VoicePlayer } from '@/components/voice/VoicePlayer';
+import { VoiceRecorder } from '@/components/voice/VoiceRecorder';
+import { asVoiceNote, MAX_ANSWER_VOICE_SECONDS, uploadVoice, type LocalVoice } from '@/lib/voice';
 import { getUserName } from '@/lib/auth';
 import { getMyCouple } from '@/lib/couples';
 import { answersMatch, hasSeenReveal, markRevealSeen } from '@/lib/moments';
@@ -57,6 +62,7 @@ export default function TodayActivity() {
   const [inputText, setInputText] = useState('');
   const [pickedPhoto, setPickedPhoto] = useState<string | null>(null);
   const [pickedSong, setPickedSong] = useState<Song | null>(null);
+  const [pickedVoice, setPickedVoice] = useState<LocalVoice | null>(null);
   const [songPickerOpen, setSongPickerOpen] = useState(false);
   usePreviewStopOnBlur();
   const [loading, setLoading] = useState(true);
@@ -173,6 +179,7 @@ export default function TodayActivity() {
   async function handleSubmit() {
     const isPhotoPrompt = dailyActivity?.activities?.response_type === 'photo';
     const isSongPrompt = dailyActivity?.activities?.response_type === 'song';
+    const isVoicePrompt = dailyActivity?.activities?.response_type === 'voice';
 
     if (isPhotoPrompt && !pickedPhoto) {
       Alert.alert('Add a photo', 'This one needs a picture, not just text.');
@@ -182,7 +189,11 @@ export default function TodayActivity() {
       Alert.alert('Pick a song', 'This one needs a song.');
       return;
     }
-    if (!isPhotoPrompt && !isSongPrompt && !inputText.trim()) {
+    if (isVoicePrompt && !pickedVoice) {
+      Alert.alert('Record something', 'This one needs a voice note.');
+      return;
+    }
+    if (!isPhotoPrompt && !isSongPrompt && !isVoicePrompt && !inputText.trim()) {
       Alert.alert('Say something', 'Write your answer first.');
       return;
     }
@@ -198,15 +209,24 @@ export default function TodayActivity() {
         });
       }
 
+      // <couple>/activity-responses/<daily>/<me>/voice-….m4a — hidden from my
+      // partner by storage RLS until they've answered too (017/018).
+      const voice =
+        isVoicePrompt && pickedVoice && coupleId && myId
+          ? await uploadVoice(`${coupleId}/activity-responses/${dailyActivity.id}/${myId}`, pickedVoice)
+          : null;
+
       await submitActivityResponse(
         dailyActivity.id,
-        inputText.trim() || (isPhotoPrompt ? '📸' : isSongPrompt ? '🎵' : ''),
+        inputText.trim() || (isPhotoPrompt ? '📸' : isSongPrompt ? '🎵' : isVoicePrompt ? '🎙️' : ''),
         mediaPath,
-        isSongPrompt ? pickedSong : null
+        isSongPrompt ? pickedSong : null,
+        voice
       );
       setInputText('');
       setPickedPhoto(null);
       setPickedSong(null);
+      setPickedVoice(null);
       // Refetch: now that I've answered, RLS lets me read their response.
       await load();
     } catch (err: any) {
@@ -275,10 +295,18 @@ export default function TodayActivity() {
             </View>
           )}
 
-          {responseType === 'voice' && !myResponse && (
-            <Body variant="small" color={colors.inkSoft} style={styles.voiceNote}>
-              Voice recording is coming soon — for now, just type what you'd say.
-            </Body>
+          {!myResponse && responseType === 'voice' && (
+            <View style={styles.answerBox}>
+              {pickedVoice ? (
+                <View style={styles.voicePicked}>
+                  <VoicePlayer playKey={pickedVoice.uri} uri={pickedVoice.uri} durationSeconds={pickedVoice.durationMs / 1000} waveform={pickedVoice.waveform} />
+                  <Button title="Record again" variant="text" onPress={() => setPickedVoice(null)} disabled={submitting} />
+                </View>
+              ) : (
+                <VoiceRecorder maxSeconds={MAX_ANSWER_VOICE_SECONDS} label={`Say it to ${names.partner}`} onUse={setPickedVoice} />
+              )}
+              {pickedVoice && <Button title="Send my voice note" onPress={handleSubmit} loading={submitting} />}
+            </View>
           )}
 
           {!myResponse && responseType === 'photo' && (
@@ -320,7 +348,7 @@ export default function TodayActivity() {
             </View>
           )}
 
-          {!myResponse && responseType !== 'photo' && responseType !== 'song' && (
+          {!myResponse && responseType !== 'photo' && responseType !== 'song' && responseType !== 'voice' && (
             <View style={styles.answerBox}>
               <Input
                 placeholder="Your answer…"
@@ -342,6 +370,7 @@ export default function TodayActivity() {
                 Your answer is in. It'll open here the moment theirs arrives.
               </Body>
               <Button title="Check again" variant="soft" onPress={() => load(true)} style={styles.checkAgain} />
+              <NotifyPromptCard partnerName={names.partner} style={styles.pushCard} />
             </View>
           )}
 
@@ -394,13 +423,15 @@ export default function TodayActivity() {
                 <>
                   <AnswerNote
                     who="You"
-                    text={myResponse.response !== '📸' ? myResponse.response : null}
+                    text={answerText(myResponse)}
+                    voice={myResponse.voice}
                     tilt={-1.5}
                     tint={colors.warmWhite}
                   />
                   <AnswerNote
                     who="Them"
-                    text={partnerResponse.response !== '📸' ? partnerResponse.response : null}
+                    text={answerText(partnerResponse)}
+                    voice={partnerResponse.voice}
                     imageUrl={partnerMediaUrl}
                     tilt={1.2}
                     tint={colors.sand}
@@ -416,9 +447,13 @@ export default function TodayActivity() {
   );
 }
 
+// The typed answer, minus the placeholders stored for photo/song/voice answers.
+function answerText(r: any): string | null {
+  return r?.response && r.response !== '📸' && r.response !== '🎵' && r.response !== '🎙️' ? r.response : null;
+}
+
 function toRevealAnswer(r: any, imageUrl: string | null): RevealAnswer {
-  const text = r?.response && r.response !== '📸' && r.response !== '🎵' ? r.response : null;
-  return { text, song: r?.song ?? null, imageUrl };
+  return { text: answerText(r), song: r?.song ?? null, imageUrl, voice: asVoiceNote(r?.voice)?.waveform ?? null };
 }
 
 function sentenceCase(s: string) {
@@ -429,12 +464,14 @@ function sentenceCase(s: string) {
 function AnswerNote({
   who,
   text,
+  voice,
   imageUrl,
   tilt,
   tint,
 }: {
   who: string;
   text?: string | null;
+  voice?: unknown;
   imageUrl?: string | null;
   tilt: number;
   tint: string;
@@ -445,6 +482,7 @@ function AnswerNote({
         {who}
       </Body>
       {text ? <Handwritten style={styles.answerText}>{text}</Handwritten> : null}
+      {voice ? <AnswerVoice voice={voice} style={styles.answerVoice} /> : null}
       {imageUrl ? (
         <Image source={{ uri: imageUrl }} style={styles.revealImage} contentFit="cover" />
       ) : null}
@@ -468,7 +506,8 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginTop: space.xl,
   },
-  voiceNote: { marginTop: space.sm },
+  voicePicked: { gap: space.xs },
+  answerVoice: { marginTop: space.sm },
   answerBox: { marginTop: space.xl, gap: space.md },
   songCard: { marginLeft: space.xl },
   songPair: { flexDirection: 'row', gap: space.md },
@@ -494,6 +533,7 @@ const styles = StyleSheet.create({
   waiting: { alignItems: 'center', marginTop: space.xxl, gap: space.xs },
   waitingTitle: { marginTop: space.md },
   checkAgain: { marginTop: space.xl },
+  pushCard: { marginTop: space.xl, alignSelf: 'stretch' },
   reveal: { marginTop: space.xxl, gap: space.xl },
   revealHeader: { alignItems: 'center', gap: space.sm },
   answerNote: {

@@ -51,6 +51,10 @@ export default function RootLayout() {
           name="memory/reel"
           options={{ presentation: "fullScreenModal", animation: "fade" }}
         />
+        <Stack.Screen
+          name="anniversary/[year]"
+          options={{ presentation: "fullScreenModal", animation: "fade" }}
+        />
       </Stack>
       {/* web only: one-time "Add Us to your home screen" hint in iOS Safari */}
       <InstallHint />

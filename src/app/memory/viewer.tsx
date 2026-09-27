@@ -33,7 +33,8 @@ export default function MediaViewer() {
     (async () => {
       try {
         const memory = await getMemoryById(memoryId);
-        setItems(await resolveMedia(memory.memory_media ?? []));
+        // voice notes aren't in the viewer (same indexes as the collage)
+        setItems((await resolveMedia(memory.memory_media ?? [])).filter((m) => m.type !== "voice"));
       } catch (err: any) {
         console.log("[MediaViewer] load failed:", err.message);
         setItems([]);

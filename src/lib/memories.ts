@@ -4,6 +4,7 @@ import { supabase } from "./supabase";
 import type { Song } from "./music";
 import { Platform } from "react-native";
 import { uploadLocalFile, videoExtension } from "./upload";
+import { asVoiceNote, asWaveform, uploadVoice, type LocalVoice } from "./voice";
 
 export type MediaType = "photo" | "video" | "voice";
 
@@ -96,6 +97,7 @@ export type MediaRef = {
   thumbnail_path: string | null;
   media_type: MediaType;
   duration_seconds: number | null;
+  waveform?: number[] | null; // voice notes only (018)
 };
 
 // Uploads one local photo/video (+ a thumbnail for videos) into `folder` and
@@ -206,6 +208,35 @@ export async function uploadMemoryMedia(params: {
   return data;
 }
 
+// A voice note in a memory: an .m4a in the memory's folder + a memory_media
+// row (media_type 'voice', with its waveform). Delete rules are the same as
+// photos (removeMediaItem / deleteMemory remove the file first).
+export async function addMemoryVoice(params: {
+  coupleId: string;
+  memoryId: string;
+  voice: LocalVoice;
+  onProgress?: (fraction: number) => void;
+}) {
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user) throw new Error("Not signed in");
+  const note = await uploadVoice(`${params.coupleId}/${params.memoryId}`, params.voice, params.onProgress);
+  const { data, error } = await supabase
+    .from("memory_media")
+    .insert({
+      memory_id: params.memoryId,
+      media_type: "voice",
+      storage_path: note.storage_path,
+      thumbnail_path: null,
+      duration_seconds: note.duration_seconds,
+      waveform: note.waveform,
+      created_by: authData.user.id,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // Returns a temporary signed URL for displaying a private media file.
 export async function getSignedMediaUrl(
   storagePath: string,
@@ -244,6 +275,7 @@ export type MemoryMediaRow = {
   storage_path: string;
   thumbnail_path: string | null;
   duration_seconds: number | null;
+  waveform?: unknown;
 };
 
 export type ResolvedMedia = {
@@ -258,6 +290,7 @@ export type ResolvedMedia = {
   storagePath: string;
   thumbnailPath: string | null;
   durationSeconds: number | null;
+  waveform: number[] | null; // voice notes only
 };
 
 // Signs every item of a memory in one request (1 hour — long enough to watch
@@ -287,6 +320,7 @@ export async function resolveMedia(
       storagePath: m.storage_path,
       thumbnailPath: m.thumbnail_path,
       durationSeconds: m.duration_seconds,
+      waveform: m.media_type === "voice" ? asWaveform(m.waveform) : null,
     });
   }
   return out;
@@ -375,13 +409,34 @@ function fileLabel(path: string) {
 // can't be removed, the row is kept and the error lists what failed.
 export async function deleteMemory(memoryId: string) {
   const memory = await getMemoryById(memoryId);
-  const failed = await removeFiles(mediaPaths(memory.memory_media ?? []));
+  // Two-perspectives voice notes I can see (mine, and my partner's once revealed).
+  const { data: reflections } = await supabase.from("memory_reflections").select("voice").eq("memory_id", memoryId);
+  const voicePaths = (reflections ?? []).map((r: any) => asVoiceNote(r.voice)?.storage_path).filter((p): p is string => !!p);
+  const failed = await removeFiles([...mediaPaths(memory.memory_media ?? []), ...voicePaths]);
   if (failed.length > 0) {
     throw new Error(`These files couldn't be removed, so the memory was kept:\n${failed.map(fileLabel).join("\n")}`);
   }
   const { data, error } = await supabase.from("memories").delete().eq("id", memoryId).select("id");
   if (error) throw error;
   if (!data || data.length === 0) throw new Error("The files were removed, but the memory itself couldn't be deleted.");
+  // A partner's side that I hadn't unlocked yet was invisible to me until now;
+  // once the memory is gone, migration 019 lets either of us clean it up.
+  await sweepReflectionVoices(memory.couple_id, memoryId);
+}
+
+async function sweepReflectionVoices(coupleId: string, memoryId: string) {
+  try {
+    const base = `${coupleId}/reflections/${memoryId}`;
+    const { data: folders } = await supabase.storage.from("memory-media").list(base);
+    const paths: string[] = [];
+    for (const f of folders ?? []) {
+      const { data: files } = await supabase.storage.from("memory-media").list(`${base}/${f.name}`);
+      for (const file of files ?? []) paths.push(`${base}/${f.name}/${file.name}`);
+    }
+    if (paths.length) await supabase.storage.from("memory-media").remove(paths);
+  } catch (err: any) {
+    console.log("[deleteMemory] reflection voice sweep failed:", err?.message);
+  }
 }
 
 // Removes one photo/video (and its thumbnail) from a memory, same rule:
